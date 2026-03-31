@@ -1,11 +1,57 @@
 ---
-title: "fitness_analysis"
+title: "フィットネス事業 データ分析レポート"
+subtitle: "売上・利益向上に向けた分析と施策提案"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-title: "目次"
+    theme: flatly
+    code-fold: true
+    code-summary: "コードを表示"
+    self-contained: true
+    fig-width: 9
+    fig-height: 5
+execute:
+  warning: false
+  message: false
 ---
 
-## Quarto
-
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+## Load Packages
 
 ```{r}
-1 + 1 
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(forcats)
+library(scales)
+library(knitr)
+library(kableExtra)
+library(pROC)
+library(randomForest)
+library(caret)
+library(gridExtra)
+
+
+```
+
+# Data Cleaning
+
+```{r}
+# load data
+data <- "fitness_gym_data.xlsx"
+
+users <- read_excel(data, sheet = "ユーザーデータ")
+training <- read_excel(data, sheet = "トレーニングログ")
+body     <- read_excel(data, sheet = "体組成ログ")
+purchase <- read_excel(data, sheet = "購入ログ")
+products <- read_excel(data, sheet = "商品マスタ")
+area_mst <- read_excel(data, sheet = "居住エリアマスタ")
+
+
+```
+
+```{r}
+
 ```
