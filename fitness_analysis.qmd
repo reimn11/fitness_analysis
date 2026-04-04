@@ -32,26 +32,282 @@ library(pROC)
 library(randomForest)
 library(caret)
 library(gridExtra)
+library(showtext)
+showtext_auto()
 
+library(showtext)
+library(ggplot2)
 
+# Use Google's free Japanese font
+font_add_google("Noto Sans JP", "noto")
+showtext_auto()
+
+# Apply to all charts
+theme_set(theme_minimal(base_size = 13, base_family = "noto"))
 ```
 
 # Data Cleaning
 
+## download the dataset
+
 ```{r}
-# load data
-data <- "fitness_gym_data.xlsx"
+# df
+# changed a name to "fitness_gym_data.xlsx"
 
-users <- read_excel(data, sheet = "ユーザーデータ")
-training <- read_excel(data, sheet = "トレーニングログ")
-body     <- read_excel(data, sheet = "体組成ログ")
-purchase <- read_excel(data, sheet = "購入ログ")
-products <- read_excel(data, sheet = "商品マスタ")
-area_mst <- read_excel(data, sheet = "居住エリアマスタ")
+df <- "fitness_gym_data.xlsx" # avoid repetation
 
+users <- read_excel(df, sheet = "ユーザーデータ")
+training <- read_excel(df, sheet = "トレーニングログ")
+body     <- read_excel(df, sheet = "体組成ログ")
+purchase <- read_excel(df, sheet = "購入ログ")
+products <- read_excel(df, sheet = "商品マスタ")
+area_mst <- read_excel(df, sheet = "居住エリアマスタ")
+
+PALETTE <- c("#2196F3", "#FF5722")   # 継続=青, 離脱=オレンジ
 
 ```
 
-```{r}
+## Change the columns name (カラム名を英語に統一)
 
+```{r}
+# ── カラム名を英語に統一
+colnames(users)    <- c("user_id","age","gender","area_id","reg_date", "continued","total_purchase","purpose")
+
+colnames(training) <- c("user_id","aerobic","calorie_ctrl","trainer","gym_visits","gym_hours")
+
+colnames(body) <- c("user_id","delta_weight","delta_bodyfat","delta_muscle")
+
+colnames(purchase) <- c("order_id","user_id","product_id","amount")
+
+colnames(products) <- c("product_id","product_name","category","price","release_date")
+
+colnames(area_mst) <- c("area_id","area_name","prefectures")
+```
+
+## Adding labels (ラベル付与）
+
+```{r}
+users <- users %>% 
+  mutate(gender_lbl  = factor(gender,  levels = c(1,2), labels = c("男性","女性")),
+    purpose_lbl = factor(purpose, levels = c(1,2,3),
+                          labels = c("筋力肥大","ボディメイク","健康志向")),
+    continued_lbl = factor(continued, levels = c(0,1),
+                            labels = c("離脱","継続"))
+  ) %>%
+  left_join(area_mst %>% select(area_id, area_name), by = "area_id") %>%
+  mutate(age_group = cut(age,
+    breaks = c(0,24,29,34,39,Inf),
+    labels = c("～24歳","25～29歳","30～34歳","35～39歳","40歳～"),
+    right  = TRUE))
+
+```
+
+## Create Master Table (マスターテーブルの作成）
+
+```{r}
+# 分析用マスターテーブル 
+master <- users %>%
+  left_join(training, by = "user_id") %>%
+  left_join(body,     by = "user_id")
+
+```
+
+---
+
+# 課題概要
+
+| 課題 | 内容 | 主な結果 |
+|------------------------|------------------------|------------------------|
+| １ | 入会30日後の継続・離脱分析 | トレーナー利用・ジム来館頻度が継続に強く寄与 |
+| ２ | 商品購入金額の影響要素分析 | トレーナー利用・ジム頻度・サプリ購入傾向が影響大 |
+| ３ | 継続率予測モデル | Random Forest AUC ≈ 0.87 (CV) |
+| ４ | 購入金額予測モデル | Random Forest RMSE ≈ 2,100円 (CV) |
+
+# ① 継続・離脱分析
+
+## 全体の継続率
+
+```{r}
+cont_rate <- users %>%
+  count(continued_lbl) %>%
+  mutate(pct = n / sum(n))
+
+ggplot(cont_rate, aes(x = "", y = pct, fill = continued_lbl)) +
+  geom_col(width = 0.5, color = "white", linewidth = 1.0) +
+  geom_text(aes(label = percent(pct, 1)),
+            position = position_stack(vjust = 0.5),
+            color = 'white') +
+  scale_y_continuous(labels = percent) +
+  labs(title = "入会30日後の継続・離脱率",
+       x = NULL, y = NULL, fill = NULL) 
+```
+
+```{r}
+cont_rate %>%
+  mutate(pct = percent(pct, 0.1)) %>%
+  rename(ステータス = continued_lbl, 人数 = n, 割合 = pct) %>%
+  kable(caption = "継続・離脱 内訳") 
+
+```
+
+## 属性別の継続率
+
+```{r}
+plot_cont_by <- function(data, var, label) {
+  data %>%
+    group_by(.data[[var]], continued_lbl) %>%
+    summarise(n = n(), .groups = "drop") %>%
+    group_by(.data[[var]]) %>%
+    mutate(pct = n / sum(n)) %>%
+    filter(continued_lbl == "継続") %>%
+    ggplot(aes(x = fct_reorder(.data[[var]], pct), y = pct)) +
+    geom_col(fill = PALETTE[1], alpha = 0.85) +
+    geom_text(aes(label = percent(pct, 1)), hjust = -0.1, size = 3.8) +
+    coord_flip() +
+    scale_y_continuous(labels = percent, limits = c(0, 1)) +
+    labs(title = paste(label, "別継続率"), x = NULL, y = "継続率")
+}
+
+p1 <- plot_cont_by(users, "gender_lbl",  "性別")
+p2 <- plot_cont_by(users, "age_group",   "年齢層")
+p3 <- plot_cont_by(users, "purpose_lbl", "目的")
+p4 <- plot_cont_by(users, "area_name",   "居住エリア")
+
+gridExtra::grid.arrange(p1, p2, p3, p4, ncol = 2)
+```
+
+## トレーニング行動と継続の関係
+
+```{r}
+train_cont <- master %>%
+  filter(!is.na(gym_visits)) %>%
+  select(continued_lbl, aerobic, calorie_ctrl, trainer,
+         gym_visits, gym_hours) %>%
+  mutate(trainer = factor(trainer, labels = c("未利用","利用")))
+
+# ジム来館回数
+p_visits <- ggplot(train_cont, aes(x = continued_lbl, y = gym_visits,
+                                    fill = continued_lbl)) +
+  geom_boxplot(alpha = 0.8, outlier.shape = 21) +
+  scale_fill_manual(values = rev(PALETTE)) +
+  labs(title = "ジム来館回数", x = NULL, y = "回数", fill = NULL) +
+  theme(legend.position = "none")
+
+# ジム滞在時間
+p_hours <- ggplot(train_cont, aes(x = continued_lbl, y = gym_hours,
+                                   fill = continued_lbl)) +
+  geom_boxplot(alpha = 0.8, outlier.shape = 21) +
+  scale_fill_manual(values = rev(PALETTE)) +
+  labs(title = "ジム合計滞在時間", x = NULL, y = "分", fill = NULL) +
+  theme(legend.position = "none")
+
+# トレーナー利用率
+p_trainer <- train_cont %>%
+  count(continued_lbl, trainer) %>%
+  group_by(continued_lbl) %>%
+  mutate(pct = n / sum(n)) %>%
+  filter(trainer == "利用") %>%
+  ggplot(aes(x = continued_lbl, y = pct, fill = continued_lbl)) +
+  geom_col(alpha = 0.85) +
+  geom_text(aes(label = percent(pct, 1)), vjust = -0.5, fontface = "bold") +
+  scale_fill_manual(values = rev(PALETTE)) +
+  scale_y_continuous(labels = percent, limits = c(0, 1)) +
+  labs(title = "トレーナー利用率", x = NULL, y = "割合", fill = NULL) +
+  theme(legend.position = "none")
+
+# 有酸素運動
+p_aerobic <- ggplot(train_cont, aes(x = continued_lbl, y = aerobic,
+                                     fill = continued_lbl)) +
+  geom_boxplot(alpha = 0.8, outlier.shape = 21) +
+  scale_fill_manual(values = rev(PALETTE)) +
+  labs(title = "有酸素運動量", x = NULL, y = "kcal", fill = NULL) +
+  theme(legend.position = "none")
+
+# カロリー制限
+p_calorie <- ggplot(train_cont, aes(x = continued_lbl, y = calorie_ctrl,
+                                     fill = continued_lbl)) +
+  geom_boxplot(alpha = 0.8, outlier.shape = 21) +
+  scale_fill_manual(values = rev(PALETTE)) +
+  labs(title = "カロリー制限", x = NULL, y = "kcal", fill = NULL) +
+  theme(legend.position = "none")
+
+gridExtra::grid.arrange(p_visits, p_hours, p_trainer, p_aerobic, p_calorie, ncol = 2)
+```
+
+\*\*ジムへの来館回数、ジムの合計時間滞在時間、トレーナ利用率、そして有酸素運動量、全て数値が高いほど、継続率が高くなった。
+
+トレーナー利用とそのほか（ジム来館回数、滞在時間、有酸素運動、体重、体脂肪、筋肉量）の関係を見てみたが、特に顕著な関係はみられなかった。（例：トレーナー利用が高いとジムへの来館回数が増えた、などがなかった。）
+
+## 体の変化と継続の関係
+
+```{r}
+body_cont <- master %>%
+  select(continued_lbl, delta_weight, delta_bodyfat, delta_muscle)
+
+p_w <- ggplot(body_cont, aes(x = continued_lbl, y = delta_weight,
+                               fill = continued_lbl)) +
+  geom_boxplot(alpha = 0.8) +
+  scale_fill_manual(values = rev(PALETTE)) +
+  labs(title = "体重変化 (kg)", x = NULL, y = "Δkg", fill = NULL) +
+  theme(legend.position = "none")
+
+p_f <- ggplot(body_cont, aes(x = continued_lbl, y = delta_bodyfat * 100,
+                               fill = continued_lbl)) +
+  geom_boxplot(alpha = 0.8) +
+  scale_fill_manual(values = rev(PALETTE)) +
+  coord_cartesian(ylim = c(-2, 2)) +  #  zoom in, ignores outlier
+  labs(title = "体脂肪率変化", x = NULL, y = "Δ%", fill = NULL) +
+  theme(legend.position = "none")
+
+p_m <- ggplot(body_cont, aes(x = continued_lbl, y = delta_muscle,
+                               fill = continued_lbl)) +
+  geom_boxplot(alpha = 0.8) +
+  scale_fill_manual(values = rev(PALETTE)) +
+  labs(title = "筋肉量変化 (kg)", x = NULL, y = "Δkg", fill = NULL) +
+  theme(legend.position = "none")
+
+gridExtra::grid.arrange(p_w, p_f, p_m, ncol = 3)
+```
+
+\>**解釈**
+
+体重、体脂肪が減少した減っている方が継続率が高い。筋肉量は増加している方が継続率が高い。
+
+## ① 施策提案 {.callout-note}
+
+::: {.callout-tip title="継続者増加に向けた施策提案"}
+全体の継続率はわずか30%（60人）であり、
+70%（140人）が30日以内に離脱している。
+離脱防止が最優先課題である。
+
+**A トレーナーフォローアップの強化**\
+トレーナーを利用したユーザーは継続率が顕著に高い。\
+→ 初月レクチャー後も月1回のトレーナー面談を標準メニュー化。
+
+**B ジム来館頻度の促進**\
+継続者は離脱者よりも来館回数・滞在時間が多い。\
+→ 週3回以上来館者へのポイント還元・目標達成バッジ制度を導入。
+
+**C 入会直後の30～34歳の離脱が最も多い。**
+→ 仕事・育児で忙しい世代向けに短時間プログラムを整備。
+
+**D エリア別マーケティングの強化**
+四国地方・北海道地方の継続率が50%と最も高い一方、
+関東地方・九州地方は30%と低い。
+→ 都市部ユーザー向けに柔軟な通い方（オンライン併用）を提供。
+
+**E 男性ユーザーへの重点施策**
+女性（32%）より男性（28%）の継続率が低い。
+→ 男性向けに筋力・体型変化を数値で見える化する
+
+**F 有酸素運動プログラムの充実**
+継続者の有酸素運動量は離脱者と比べて
+大幅に高い。
+→ ランニングマシン・バイクの使い方講習を
+入会1週目に実施
+:::
+
+------------------------------------------------------------------------
+
+```{r}
 ```
