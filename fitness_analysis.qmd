@@ -17,100 +17,221 @@ execute:
   message: false
 ---
 
-## Load Packages
+# データセッティング
+
+## パッケージを読み込み
 
 ```{r}
-library(readxl)
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-library(forcats)
-library(scales)
-library(knitr)
-library(kableExtra)
-library(pROC)
-library(randomForest)
-library(caret)
-library(gridExtra)
-library(showtext)
-showtext_auto()
+# ── パッケージ読み込み ────────────────────────────────
+# データ操作・可視化・モデリングに必要なパッケージ
 
-library(showtext)
-library(ggplot2)
+library(readxl)       # Excelファイル読み込み
+library(dplyr)        # データ操作（filter, mutate, select等）
+library(tidyr)        # データ整形（pivot_longer, replace_na等）
+library(ggplot2)      # グラフ作成
+library(forcats)      # 因子型の操作（fct_reorder等）
+library(scales)       # 軸ラベルのフォーマット（percent, comma等）
+library(knitr)        # テーブル表示（kable）
+library(kableExtra)   # テーブルのスタイリング
+library(pROC)         # ROC曲線・AUCの計算
+library(randomForest) # Random Forestモデル
+library(caret)        # 機械学習のラッパー（交差検証等）
+library(gridExtra)    # 複数グラフの配置
+library(tibble)       # rownames_to_column等
+library(showtext)     # 日本語フォントのサポート
 
-# Use Google's free Japanese font
+
+# ── 日本語フォント設定 ────────────────────────────────
+# Googleフォント「Noto Sans JP」を使用
 font_add_google("Noto Sans JP", "noto")
-showtext_auto()
+showtext_auto()  # 全グラフに自動適用
 
-# Apply to all charts
-theme_set(theme_minimal(base_size = 13, base_family = "noto"))
+# ── ggplot2 テーマ設定 ────────────────────────────────
+# 全グラフに共通のスタイルを適用
+theme_set(
+  theme_minimal(
+    base_size   = 13,     
+    base_family = "noto"   # 日本語フォント
+  ) +
+  theme(
+    plot.title       = element_text(face = "bold", size = 14),
+    plot.subtitle    = element_text(color = "grey40", size = 11),
+    panel.grid.minor = element_blank(),
+    legend.position  = "bottom"
+  )
+)
 ```
 
-# Data Cleaning
-
-## download the dataset
+## データ読み込み
 
 ```{r}
-# df
-# changed a name to "fitness_gym_data.xlsx"
+# データ読み込み
+df <- "fitness_gym_data.xlsx"  
 
-df <- "fitness_gym_data.xlsx" # avoid repetation
+# 各シートを個別のデータフレームとして読み込み
+users    <- read_excel(df, sheet = "ユーザーデータ")
 
-users <- read_excel(df, sheet = "ユーザーデータ")
 training <- read_excel(df, sheet = "トレーニングログ")
+#   有酸素運動・カロリー制限・トレーナー利用・来館回数・滞在時間
+
 body     <- read_excel(df, sheet = "体組成ログ")
+#   体重・体脂肪率・筋肉量の30日間の増減
+
 purchase <- read_excel(df, sheet = "購入ログ")
+#   注文番号・ユーザーID・商品ID・購入金額
+
 products <- read_excel(df, sheet = "商品マスタ")
+#   商品名・カテゴリ・価格
+
 area_mst <- read_excel(df, sheet = "居住エリアマスタ")
+#   エリアID・エリア名・都道府県リスト
 
-PALETTE <- c("#2196F3", "#FF5722")   # 継続=青, 離脱=オレンジ
-
+# ── カラーパレット設定 ────────────────────────────────
+PALETTE <- c("#2196F3", "#FF5722")
+# 継続 = 青（#2196F3）
+# 離脱 = オレンジ（#FF5722）
+# → 全グラフで統一して使用
 ```
 
-## Change the columns name (カラム名を英語に統一)
+## カラム名を英語に統一
 
 ```{r}
-# ── カラム名を英語に統一
-colnames(users)    <- c("user_id","age","gender","area_id","reg_date", "continued","total_purchase","purpose")
+# ── カラム名を英語に統一 ──────────────────────────────
+# 日本語カラム名はRで扱いにくいため英語に変換
 
-colnames(training) <- c("user_id","aerobic","calorie_ctrl","trainer","gym_visits","gym_hours")
+colnames(users) <- c(
+  "user_id",        # ユーザーID（結合キー）
+  "age",            # 年齢
+  "gender",         # 性別（1=男性, 2=女性）
+  "area_id",        # 居住エリアID（マスタと紐付け）
+  "reg_date",       # 登録日（入会日）
+  "continued",      # 継続フラグ（1=継続, 0=離脱）
+  "total_purchase", # 累計購入金額（円）
+  "purpose"         # 目的（1=筋力肥大, 2=ボディメイク, 3=健康志向）
+)
 
-colnames(body) <- c("user_id","delta_weight","delta_bodyfat","delta_muscle")
+colnames(training) <- c(
+  "user_id",      # ユーザーID（結合キー）
+  "aerobic",      # 有酸素運動量（kcal）
+  "calorie_ctrl", # カロリー制限量
+  "trainer",      # トレーナー利用フラグ（1=利用, 0=未利用）
+  "gym_visits",   # ジム来館回数（回）
+  "gym_hours"     # ジム合計滞在時間（分）
+)
 
-colnames(purchase) <- c("order_id","user_id","product_id","amount")
+colnames(body) <- c(
+  "user_id",       # ユーザーID（結合キー）
+  "delta_weight",  # 体重変化量（kg）入会時からの増減
+  "delta_bodyfat", # 体脂肪率変化（%）入会時からの増減
+  "delta_muscle"   # 筋肉量変化（kg）入会時からの増減
+)
 
-colnames(products) <- c("product_id","product_name","category","price","release_date")
+colnames(purchase) <- c(
+  "order_id",   # 注文番号（1注文1行）
+  "user_id",    # ユーザーID（結合キー）
+  "product_id", # 商品ID（商品マスタと紐付け）
+  "amount"      # 購入金額（円）
+)
 
-colnames(area_mst) <- c("area_id","area_name","prefectures")
+colnames(products) <- c(
+  "product_id",   # 商品ID（結合キー）
+  "product_name", # 商品名
+  "category",     # カテゴリ（ウェア/サプリメント/グッズ）
+  "price",        # 価格（円）
+  "release_date"  # 発売日
+)
+
+colnames(area_mst) <- c(
+  "area_id",     # エリアID（結合キー）
+  "area_name",   # エリア名（例：関東地方）
+  "prefectures"  # 都道府県リスト
+)
 ```
 
-## Adding labels (ラベル付与）
+## ラベル付与
 
 ```{r}
-users <- users %>% 
-  mutate(gender_lbl  = factor(gender,  levels = c(1,2), labels = c("男性","女性")),
-    purpose_lbl = factor(purpose, levels = c(1,2,3),
-                          labels = c("筋力肥大","ボディメイク","健康志向")),
-    continued_lbl = factor(continued, levels = c(0,1),
-                            labels = c("離脱","継続"))
+# ── ラベル付与 ────────────────────────────────────────
+# 数値コードを人間が読める文字列に変換する
+# 理由: グラフ・テーブルで「1」より「男性」の方がわかりやすいため
+
+users <- users %>%
+  mutate(
+    # 性別ラベル
+    # 元データ: 1=男性, 2=女性
+    gender_lbl = factor(
+      gender,
+      levels = c(1, 2),
+      labels = c("男性", "女性")
+    ),
+
+    # 目的ラベル
+    # 元データ: 1=筋力肥大, 2=ボディメイク, 3=健康志向
+    purpose_lbl = factor(
+      purpose,
+      levels = c(1, 2, 3),
+      labels = c("筋力肥大", "ボディメイク", "健康志向")
+    ),
+
+    # 継続フラグラベル
+    # 元データ: 0=離脱, 1=継続
+    continued_lbl = factor(
+      continued,
+      levels = c(0, 1),
+      labels = c("離脱", "継続")
+    )
   ) %>%
-  left_join(area_mst %>% select(area_id, area_name), by = "area_id") %>%
-  mutate(age_group = cut(age,
-    breaks = c(0,24,29,34,39,Inf),
-    labels = c("～24歳","25～29歳","30～34歳","35～39歳","40歳～"),
-    right  = TRUE))
 
+  # 居住エリア名をマスタから結合
+  # area_id をキーに area_name を追加
+  left_join(
+    area_mst %>% select(area_id, area_name),
+    by = "area_id"
+  ) %>%
+
+  # 年齢グループを作成
+  # 連続値の年齢を5つのグループに分類
+  # 理由: 個別年齢より年齢層でみた方がパターンが把握しやすいため
+  mutate(
+    age_group = cut(
+      age,
+      breaks = c(0, 24, 29, 34, 39, Inf), # 区切り点
+      labels = c(
+        "～24歳",    # 24歳以下
+        "25～29歳",  # 25〜29歳
+        "30～34歳",  # 30〜34歳
+        "35～39歳",  # 35〜39歳
+        "40歳～"     # 40歳以上
+      ),
+      right = TRUE  # 区切り点を右側に含む
+                    # 例: (24,29] → 25〜29歳
+    )
+  )
 ```
 
-## Create Master Table (マスターテーブルの作成）
+## マスターテーブルの作成
 
 ```{r}
-# 分析用マスターテーブル 
+# ── 分析用マスターテーブルの作成 ──────────────────────
+# 3つのテーブルを user_id をキーに結合し
+# 全分析で使う1つの大きなテーブルを作成する
+
 master <- users %>%
   left_join(training, by = "user_id") %>%
-  left_join(body,     by = "user_id")
+  left_join(body, by = "user_id") %>%
+  mutate(
+    purchased = as.integer(total_purchase > 0)
+# 購入経験フラグ
+    # 0 = 未購入
+    # 1 = 購入あり
+  )
 
+# 結果確認:
+
+master
 ```
+
+\
 
 ------------------------------------------------------------------------
 
@@ -318,21 +439,6 @@ ggplot(users, aes(x = total_purchase)) +
        x = "累計購入金額（円）", y = "ユーザー数")
 ```
 
-```{r}
-ggplot(users, aes(x = total_purchase)) +
-  geom_histogram(binwidth = 1000, fill = PALETTE[1], color = "white", alpha = 0.85) +
-  geom_vline(xintercept = mean(users$total_purchase), linetype = "dashed",
-             color = PALETTE[2], linewidth = 1) +
-  annotate("text",
-           x = mean(users$total_purchase) + 300,
-           y = Inf, vjust = 1.5,
-           label = paste0("平均 ", comma(round(mean(users$total_purchase))), "円"),
-           color = PALETTE[2], size = 4) +
-  scale_x_continuous(labels = comma) +
-  labs(title = "入会30日以内の累計購入金額分布",
-       x = "累計購入金額（円）", y = "ユーザー数")
-```
-
 ## 属性別の平均購入金額
 
 ```{r}
@@ -424,17 +530,300 @@ purchase_detail %>%
   arrange(desc(注文数)) %>%
   rename(商品名 = product_name, カテゴリ = category) %>%
   kable(
+    format      = "html",              # ← force HTML ✅
     caption     = "商品別売上ランキング",
     format.args = list(big.mark = ","),
-    align       = c("l","l","r","r")  # ← left/left/right/right alignment
+    align       = c("l","l","r","r")
   ) %>%
   kable_styling(
     bootstrap_options = c("striped","hover","bordered"),
     full_width        = FALSE,
     position          = "left"
-  ) %>%
-  column_spec(1, width = "10em", bold  = TRUE) %>%   # 商品名 width
-  column_spec(2, width = "8em") %>%                  # カテゴリ width
-  column_spec(3, width = "5em") %>%                  # 注文数 width
-  column_spec(4, width = "7em", color = "darkgreen") # 売上合計 width
+  ) 
 ```
+
+## ② 施策提案 {.callout-note}
+
+::: {.callout-tip title="商品販売売上向上に向けた施策提案"}
+**A サプリメントのクロスセル強化**\
+売上の過半数をサプリメントが占める。プロテイン購入者にシェイカー・ビタミンをセット提案。\
+→ 入会時「スターターセット（プロテイン＋シェイカー＋クレアチン）」割引バンドル導入。
+
+**B トレーナー利用者への商品提案**\
+トレーナー利用者は購入金額が高い傾向。\
+→ トレーナーが食事・サプリを個別提案する「アドバイスカード」制度を設置。
+
+**C 来館頻度連動のレコメンド通知**\
+来館回数・滞在時間と購入額に正の相関。\
+→ 週3回以上来館者にアプリからサプリ・グッズのプッシュ通知を配信。
+
+**D 購入ゼロユーザーへの初回購買促進**
+累計購入金額が0円のユーザーが最も多く、購入経験者と未経験者の二極化が見られる。
+→ 入会時に500円クーポンを配布し、初回購買のハードルを下げる。
+
+**E 若年層（～24歳）への購買促進**
+～24歳の平均購入金額が4,536円と全年齢層で最も低い。
+→ 学生割引・SNSシェアキャンペーンで、若年層の購買意欲を刺激する。
+
+**F トレーナー未利用者への購買促進**
+トレーナー未利用者（青点）は購入金額が全体的に低い傾向。
+→ トレーナー未利用者へサプリ無料サンプルを配布し、購買のきっかけを作る。
+
+**G プロテイン(3kg)の販売強化**
+プロテイン(1kg)は注文数99件と最も売れているが、3kgは注文数1件のみ。
+→ 1kg購入者へ3kgの割引オファーを送り大容量版への購買を促進する。
+:::
+
+------------------------------------------------------------------------
+
+# ③ 継続率予測モデル
+
+## データ準備
+
+```{r}
+# Keep only the columns we need
+model_data <- master %>%
+  mutate(
+    # Fill missing values with 0
+    gym_visits = replace_na(gym_visits, 0),
+    gym_hours  = replace_na(gym_hours,  0),
+    trainer    = replace_na(trainer,    0),
+    aerobic    = replace_na(aerobic,    0)
+  ) %>%
+  select(continued, gym_visits, gym_hours,trainer,aerobic,age,total_purchase) %>%
+  mutate(
+    continued = factor(continued,
+                       levels = c(0, 1),
+                       labels = c("離脱", "継続")) # ラベルを付与
+  )
+
+# Check the data
+cat("行数:", nrow(model_data), "\n")
+cat("継続:", sum(model_data$continued == "継続"), "\n")
+cat("離脱:", sum(model_data$continued == "離脱"), "\n")
+```
+
+## Random Forest 回帰モデル（5-Ford cv)
+
+```{r}
+set.seed(42)
+
+ctrl <- trainControl(
+  method          = "cv", #Cross validation
+  number          = 5, #number of fold
+  classProbs      = TRUE, #Calculate Probability
+  summaryFunction = twoClassSummary, # works for 2 categories
+  savePredictions = "final" # save this prediction
+)
+
+rf_churn <- train(
+  continued ~ ., # ~:using .: All other columns
+  data      = model_data,
+  method    = "rf", # Random Forest
+  metric    = "ROC",
+  trControl = ctrl, # connects to trainControl() setting above
+  ntree     = 300, # number f the tree to build
+  tuneGrid  = data.frame(mtry = c(1, 2, 3, 4, 5, 6)) # Chose the best number of columd pick up
+)
+
+cat("Best mtry:", rf_churn$bestTune$mtry, "\n")
+```
+
+## 正確度のチェック(AUC)
+
+```{r}
+# Get prediction
+preds <- rf_churn$pred %>%
+  filter(mtry == rf_churn$bestTune$mtry)
+# Caluculate AUC
+roc_obj <- roc(response  = preds$obs,
+               predictor = preds$継続,
+               levels    = c("離脱","継続"))
+
+auc_val <- round(auc(roc_obj), 3) # Show 3 decimal points
+cat("AUC =", auc_val, "\n")
+```
+
+## ROC
+
+```{r}
+roc_df <- data.frame(
+  specificity = rev(roc_obj$specificities),
+  sensitivity = rev(roc_obj$sensitivities)
+)
+
+ggplot(roc_df, aes(x = 1 - specificity, y = sensitivity)) +
+  geom_line(color = PALETTE[2], linewidth = 1.2) +
+  geom_abline(linetype = "dashed") +
+  annotate("text", x = 0.7, y = 0.15,
+           label = paste0("AUC = ", auc_val),
+           size = 5, fontface = "bold", color = PALETTE[1]) +
+  labs(title = "ROC曲線（5-Fold CV）",
+       subtitle = "継続・離脱の予測性能",
+       x = "偽陽性率 (1 - Specificity)",
+       y = "真陽性率 (Sensitivity)")
+```
+
+## 変数重要度
+
+```{r}
+varImp(rf_churn)$importance %>%
+  rownames_to_column("feature") %>%
+  arrange(desc(Overall)) %>%
+  mutate(feature = recode(feature,
+    "gym_visits"     = "ジム来館回数",
+    "gym_hours"      = "ジム滞在時間",
+    "trainer"        = "トレーナー利用",
+    "aerobic"        = "有酸素運動量",
+    "age"            = "年齢",
+    "total_purchase" = "累計購入金額"
+  )) %>% 
+  ggplot(aes(x = fct_reorder(feature, Overall),
+             y = Overall)) +
+  geom_col(fill = "#2196F3") +
+  geom_text(aes(label = round(Overall, 1)),
+            hjust = -0.1, size = 3) +
+  coord_flip() +
+  labs(title = "どの変数が継続予測に重要？",
+       x = NULL, y = "重要度")
+```
+
+> **③継続率予測モデルの解釈**
+>
+> **変数重要度の解釈**
+>
+> 継続予測において最も重要な変数は **有酸素運動量（重要度=100）**であり、 次いで**ジム滞在時間（60.5）**、 **ジム来館回数（33.4）**と続く。
+>
+> これらの結果から、継続するユーザーは 単にジムに来るだけでなく、 **積極的に運動している**ことが示唆される。
+>
+> 一方、**トレーナー利用（0）**は 予測にほぼ貢献していない。 これはトレーナー利用者・未利用者の 両方に継続者が存在するためと考えられる。
+>
+> **累計購入金額（33.2）**も重要度が高く、 商品を購入したユーザーは ジムへの投資意識が高く継続しやすい 傾向があると解釈できる。
+
+> **注目点**:
+>
+> ①の分析では「トレーナー利用率」が 継続者（77%）vs 離脱者（53%）で 大きく異なっていた。
+>
+> しかし予測モデルでは重要度=0。
+>
+> なので、トレーナー利用は継続と相関するが、 有酸素運動量・滞在時間などの 他の変数で説明できてしまう。
+>
+> → トレーナー利用は「結果」であり 「原因」ではない可能性がある。
+
+> **ビジネスへの示唆**:
+>
+> 継続予測に最も効くのは **「どれだけ運動したか」**であり 「何回来たか」ではない。
+>
+> → 来館回数より運動の質・量を 高める施策が効果的！ → 有酸素運動プログラムの充実が 継続率向上につながる可能性がある。
+
+# ④ 購入金額予測モデル
+
+## データ準備
+
+```{r}
+model_purchase <- master %>%
+  mutate(
+    across(c(aerobic, calorie_ctrl, trainer, gym_visits, gym_hours),
+           ~ replace_na(., 0)),
+    across(c(delta_weight, delta_bodyfat, delta_muscle),
+           ~ replace_na(., 0))
+  ) %>%
+  select(total_purchase, age, gender, purpose, aerobic, calorie_ctrl,
+         trainer, gym_visits, gym_hours, delta_weight, delta_bodyfat,
+         delta_muscle, continued, area_id, purchased)
+
+cat("サンプル数:", nrow(model_purchase), "\n")
+cat("購入金額 平均:", comma(round(mean(model_purchase$total_purchase))), "円\n")
+cat("購入金額 標準偏差:", comma(round(sd(model_purchase$total_purchase))), "円\n")
+
+```
+
+## Random Forest 回帰モデル（5-Ford cv)
+
+```{r}
+set.seed(42)
+
+ctrl_reg <- trainControl(
+  method          = "cv",
+  number          = 5,
+  savePredictions = "final"
+)
+
+rf_purchase <- train(
+  total_purchase ~ .,
+  data      = model_purchase,
+  method    = "rf",
+  metric    = "RMSE",
+  trControl = ctrl_reg,
+  ntree     = 300,
+  tuneGrid  = data.frame(mtry = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13))
+)
+ 
+cat("Best mtry:", rf_purchase$bestTune$mtry, "\n")
+```
+
+## モデル評価
+
+```{r}
+preds_reg <- rf_purchase$pred %>% # contains ALL predictions from CV
+  filter(mtry == rf_purchase$bestTune$mtry) #keeps ONLY the best mtry rows
+
+# Scatter plot
+ggplot(preds_reg, aes(x = obs, y = pred)) +
+  geom_point(alpha = 0.3, color = PALETTE[1], size = 1.8) +
+  geom_abline(linetype = "dashed", color = PALETTE[2], linewidth = 1) +
+  scale_x_continuous(labels = comma) +
+  scale_y_continuous(labels = comma) +
+  labs(title = "実際値 vs 予測値（5-Fold CV）",
+       subtitle = "破線: 完全予測ライン",
+       x = "実際の購入金額（円）",
+       y = "予測購入金額（円）")
+```
+
+## 
+
+```{r}
+res <- rf_purchase$results %>%
+  filter(mtry == rf_purchase$bestTune$mtry) %>%
+  mutate(across(c(RMSE, MAE, Rsquared), ~ round(., 3)))
+
+res %>%
+  select(mtry, RMSE, MAE, Rsquared) %>%
+  rename(`R²` = Rsquared) %>%
+  kable(caption = "CV結果（購入金額予測モデル）") %>%
+  kable_styling(bootstrap_options = c("striped","hover"), full_width = FALSE)
+```
+
+> **④ 購入金額予測モデルの解釈**
+>
+> **【データ概要】** サンプル数: 200人 購入金額 平均: 5,387円 購入金額 標準偏差: 7,914円
+>
+> 標準偏差が平均を大きく上回っており、 ユーザー間の購入金額に 大きなばらつきがあることがわかる。 （購入ゼロ円〜40,000円以上まで分布）
+
+> **【モデル性能】** mtry = 5 RMSE = 3,432円 MAE = 1,411円 R² = 0.885
+>
+> R² = 0.885は非常に高い値であり、 モデルは購入金額の変動の88.5%を 正確に説明できている。
+>
+> MAE = 1,411円は平均誤差を示しており、 平均購入金額5,387円に対して 約26%の誤差率となる。
+
+> **【実際値 vs 予測値の分析】**
+>
+> 低購入金額帯（¥0〜5,000）: → 点が対角線に密集 ✅ → 高精度で予測できている
+>
+> 高購入金額帯（¥20,000以上）: → 点が対角線から離れる ⚠️ → 予測誤差が大きくなる傾向 → サンプル数が少ないため パターン学習が困難
+
+> **【RMSEとMAEの差について】**
+>
+> RMSE = 3,432円 MAE = 1,411円 差 = 2,021円
+>
+> RMSEはMAEの約2.4倍と大きな差がある。 これはRMSEが大きな誤差を より強く罰するためであり、 高額購入者の予測が外れた際に RMSEが大きく跳ね上がることを示す。 実態に近い平均誤差はMAEの 1,411円と解釈するのが適切である。
+>
+> **【ビジネスへの示唆】**
+>
+> このモデルを活用することで: 入会直後のデータから 30日以内の購入金額を予測し、
+>
+> 高購入見込みユーザー（予測値¥10,000以上） → プロテイン3kg・コンディションガンなど 高額商品のターゲット広告を配信
+>
+> 低購入見込みユーザー（予測値¥0〜3,000） → 500円クーポン配布で 初回購買のハードルを下げる
+>
+> → 商品販売ROIの最大化が期待できる！💰
