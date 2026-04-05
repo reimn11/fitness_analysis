@@ -1,7 +1,7 @@
 ---
 title: "フィットネス事業 データ分析レポート"
 subtitle: "売上・利益向上に向けた分析と施策提案"
-author: "ミヤシロ　玲"
+author: "ミヤシロ　ナカイマ　玲"
 format:
   html:
     toc: true
