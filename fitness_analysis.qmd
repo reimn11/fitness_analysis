@@ -112,7 +112,7 @@ master <- users %>%
 
 ```
 
----
+------------------------------------------------------------------------
 
 # 課題概要
 
@@ -234,7 +234,9 @@ p_calorie <- ggplot(train_cont, aes(x = continued_lbl, y = calorie_ctrl,
 gridExtra::grid.arrange(p_visits, p_hours, p_trainer, p_aerobic, p_calorie, ncol = 2)
 ```
 
-\*\*ジムへの来館回数、ジムの合計時間滞在時間、トレーナ利用率、そして有酸素運動量、全て数値が高いほど、継続率が高くなった。
+**\>解釈**
+
+ジムへの来館回数、ジムの合計時間滞在時間、トレーナ利用率、そして有酸素運動量、全て数値が高いほど、継続率が高くなった。
 
 トレーナー利用とそのほか（ジム来館回数、滞在時間、有酸素運動、体重、体脂肪、筋肉量）の関係を見てみたが、特に顕著な関係はみられなかった。（例：トレーナー利用が高いとジムへの来館回数が増えた、などがなかった。）
 
@@ -276,9 +278,7 @@ gridExtra::grid.arrange(p_w, p_f, p_m, ncol = 3)
 ## ① 施策提案 {.callout-note}
 
 ::: {.callout-tip title="継続者増加に向けた施策提案"}
-全体の継続率はわずか30%（60人）であり、
-70%（140人）が30日以内に離脱している。
-離脱防止が最優先課題である。
+全体の継続率はわずか30%（60人）であり、 70%（140人）が30日以内に離脱している。 離脱防止が最優先課題である。
 
 **A トレーナーフォローアップの強化**\
 トレーナーを利用したユーザーは継続率が顕著に高い。\
@@ -288,26 +288,153 @@ gridExtra::grid.arrange(p_w, p_f, p_m, ncol = 3)
 継続者は離脱者よりも来館回数・滞在時間が多い。\
 → 週3回以上来館者へのポイント還元・目標達成バッジ制度を導入。
 
-**C 入会直後の30～34歳の離脱が最も多い。**
-→ 仕事・育児で忙しい世代向けに短時間プログラムを整備。
+**C 入会直後の30～34歳の離脱が最も多い。** → 仕事・育児で忙しい世代向けに短時間プログラムを整備。
 
-**D エリア別マーケティングの強化**
-四国地方・北海道地方の継続率が50%と最も高い一方、
-関東地方・九州地方は30%と低い。
-→ 都市部ユーザー向けに柔軟な通い方（オンライン併用）を提供。
+**D エリア別マーケティングの強化** 四国地方・北海道地方の継続率が50%と最も高い一方、 関東地方・九州地方は30%と低い。 → 都市部ユーザー向けに柔軟な通い方（オンライン併用）を提供。
 
-**E 男性ユーザーへの重点施策**
-女性（32%）より男性（28%）の継続率が低い。
-→ 男性向けに筋力・体型変化を数値で見える化する
+**E 男性ユーザーへの重点施策** 女性（32%）より男性（28%）の継続率が低い。 → 男性向けに筋力・体型変化を数値で見える化する
 
-**F 有酸素運動プログラムの充実**
-継続者の有酸素運動量は離脱者と比べて
-大幅に高い。
-→ ランニングマシン・バイクの使い方講習を
-入会1週目に実施
+**F 有酸素運動プログラムの充実** 継続者の有酸素運動量は離脱者と比べて 大幅に高い。 → ランニングマシン・バイクの使い方講習を 入会1週目に実施
 :::
 
 ------------------------------------------------------------------------
 
+# ② 商品購入金額の影響要素分析
+
+## 購入金額の分布
+
 ```{r}
+ggplot(users, aes(x = total_purchase)) +
+  geom_histogram(binwidth = 1000, fill = PALETTE[1], color = "white", alpha = 0.85) +
+  geom_vline(xintercept = mean(users$total_purchase), linetype = "dashed",
+             color = PALETTE[2], linewidth = 1) +
+  annotate("text",
+           x = mean(users$total_purchase) + 300,
+           y = Inf, vjust = 1.5,
+           label = paste0("平均 ", comma(round(mean(users$total_purchase))), "円"),
+           color = PALETTE[2], size = 4) +
+  scale_x_continuous(labels = comma) +
+  labs(title = "入会30日以内の累計購入金額分布",
+       x = "累計購入金額（円）", y = "ユーザー数")
+```
+
+```{r}
+ggplot(users, aes(x = total_purchase)) +
+  geom_histogram(binwidth = 1000, fill = PALETTE[1], color = "white", alpha = 0.85) +
+  geom_vline(xintercept = mean(users$total_purchase), linetype = "dashed",
+             color = PALETTE[2], linewidth = 1) +
+  annotate("text",
+           x = mean(users$total_purchase) + 300,
+           y = Inf, vjust = 1.5,
+           label = paste0("平均 ", comma(round(mean(users$total_purchase))), "円"),
+           color = PALETTE[2], size = 4) +
+  scale_x_continuous(labels = comma) +
+  labs(title = "入会30日以内の累計購入金額分布",
+       x = "累計購入金額（円）", y = "ユーザー数")
+```
+
+## 属性別の平均購入金額
+
+```{r}
+plot_purchase_by <- function(data, var, label) {
+  data %>%
+    group_by(.data[[var]]) %>%
+    summarise(mean_purchase = mean(total_purchase, na.rm = TRUE), .groups = "drop") %>%
+    ggplot(aes(x = fct_reorder(.data[[var]], mean_purchase), y = mean_purchase)) +
+    geom_col(fill = "#4CAF50", alpha = 0.85) +
+    geom_text(aes(label = paste0(comma(round(mean_purchase)), "円")),
+              hjust = -0.05, size = 3.5) +
+    coord_flip() +
+    scale_y_continuous(labels = comma, limits = c(0, max(data$total_purchase) * 0.8)) +
+    labs(title = paste(label, "別平均購入金額"), x = NULL, y = "平均購入金額（円）")
+}
+
+p1 <- plot_purchase_by(users, "gender_lbl",  "性別")
+p2 <- plot_purchase_by(users, "age_group",   "年齢層")
+p3 <- plot_purchase_by(users, "purpose_lbl", "目的")
+p4 <- plot_purchase_by(users, "area_name",   "居住エリア")
+
+gridExtra::grid.arrange(p1, p2, p3, p4, ncol = 2)
+```
+
+## トレーニング行動と購入金額の相関
+
+```{r}
+train_purch <- master %>%
+  filter(!is.na(gym_visits)) %>%
+  mutate(trainer_lbl = factor(trainer, labels = c("トレーナー未利用","トレーナー利用")))
+
+p_v <- ggplot(train_purch, aes(x = gym_visits, y = total_purchase)) +
+  geom_point(aes(color = trainer_lbl), alpha = 0.6, size = 2) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", linewidth = 0.8) +
+  scale_y_continuous(labels = comma) +
+  scale_color_manual(values = PALETTE) +
+  labs(title = "ジム来館回数 vs 購入金額",
+       x = "来館回数", y = "累計購入金額（円）", color = NULL)
+
+p_h <- ggplot(train_purch, aes(x = gym_hours, y = total_purchase)) +
+  geom_point(aes(color = trainer_lbl), alpha = 0.6, size = 2) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", linewidth = 0.8) +
+  scale_y_continuous(labels = comma) +
+  scale_color_manual(values = PALETTE) +
+  labs(title = "ジム滞在時間 vs 購入金額",
+       x = "合計滞在時間（分）", y = "累計購入金額（円）", color = NULL)
+
+gridExtra::grid.arrange(p_v, p_h, ncol = 1)
+```
+
+## 商品カテゴリ別売上構成
+
+```{r}
+purchase_detail <- purchase %>%
+  left_join(products %>% select(product_id, product_name, category), by = "product_id")
+
+cat_summary <- purchase_detail %>%
+  group_by(category) %>%
+  summarise(
+    total_amount = sum(amount),
+    order_count  = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(pct = total_amount / sum(total_amount))
+
+ggplot(cat_summary, aes(x = fct_reorder(category, total_amount), y = total_amount,
+                         fill = category)) +
+  geom_col(alpha = 0.85) +
+  geom_text(aes(label = paste0(comma(total_amount), "円\n(",
+                                percent(pct, 1), ")")),
+            hjust = -0.05, size = 3.5) +
+  coord_flip() +
+  scale_y_continuous(labels = comma,
+                     limits = c(0, max(cat_summary$total_amount) * 1.35)) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(title = "カテゴリ別売上合計",
+       x = NULL, y = "売上（円）", fill = "カテゴリ") +
+  theme(legend.position = "none")
+```
+
+```{r}
+purchase_detail %>%
+  group_by(product_name, category) %>%
+  summarise(
+    注文数   = n(),
+    売上合計 = sum(amount),
+    .groups  = "drop"
+  ) %>%
+  arrange(desc(注文数)) %>%
+  rename(商品名 = product_name, カテゴリ = category) %>%
+  kable(
+    caption     = "商品別売上ランキング",
+    format.args = list(big.mark = ","),
+    align       = c("l","l","r","r")  # ← left/left/right/right alignment
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped","hover","bordered"),
+    full_width        = FALSE,
+    position          = "left"
+  ) %>%
+  column_spec(1, width = "10em", bold  = TRUE) %>%   # 商品名 width
+  column_spec(2, width = "8em") %>%                  # カテゴリ width
+  column_spec(3, width = "5em") %>%                  # 注文数 width
+  column_spec(4, width = "7em", color = "darkgreen") # 売上合計 width
 ```
