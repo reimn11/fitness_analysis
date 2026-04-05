@@ -1,5 +1,6 @@
 project:
   title: "fitness_analysis"
+  output-dir: docs
 
 editor: visual
 
