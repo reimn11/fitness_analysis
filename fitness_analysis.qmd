@@ -17,9 +17,9 @@ execute:
   message: false
 ---
 
-# データセッティング
+## データセッティング
 
-## パッケージを読み込み
+#### パッケージを読み込み
 
 ```{r}
 # ── パッケージ読み込み ────────────────────────────────
@@ -62,7 +62,7 @@ theme_set(
 )
 ```
 
-## データ読み込み
+#### データ読み込み
 
 ```{r}
 # データ読み込み
@@ -93,7 +93,7 @@ PALETTE <- c("#2196F3", "#FF5722")
 # → 全グラフで統一して使用
 ```
 
-## カラム名を英語に統一
+#### カラム名を英語に統一
 
 ```{r}
 # ── カラム名を英語に統一 ──────────────────────────────
@@ -148,7 +148,7 @@ colnames(area_mst) <- c(
 )
 ```
 
-## ラベル付与
+#### ラベル付与
 
 ```{r}
 # ── ラベル付与 ────────────────────────────────────────
@@ -209,7 +209,7 @@ users <- users %>%
   )
 ```
 
-## マスターテーブルの作成
+#### マスターテーブルの作成
 
 ```{r}
 # ── 分析用マスターテーブルの作成 ──────────────────────
@@ -226,9 +226,6 @@ master <- users %>%
     # 1 = 購入あり
   )
 
-# 結果確認:
-
-master
 ```
 
 \
@@ -239,74 +236,180 @@ master
 
 | 課題 | 内容 | 主な結果 |
 |------------------------|------------------------|------------------------|
-| １ | 入会30日後の継続・離脱分析 | トレーナー利用・ジム来館頻度が継続に強く寄与 |
-| ２ | 商品購入金額の影響要素分析 | トレーナー利用・ジム頻度・サプリ購入傾向が影響大 |
-| ３ | 継続率予測モデル | Random Forest AUC ≈ 0.87 (CV) |
-| ４ | 購入金額予測モデル | Random Forest RMSE ≈ 2,100円 (CV) |
+| １ | 入会30日後の継続・離脱分析 | トレーナー利用・ジム来館頻度、利用時間、有酸素運動量の影響が見られた |
+| ２ | 商品購入金額の影響要素分析 | サプリメントが売上の71%・トレーナー利用者の購入金額が高い |
+| ３ | 継続率予測モデル | Random Forest AUC = 0.971（5-Fold CV） |
+| ４ | 購入金額予測モデル | Random Forest R² = 0.885 RMSE = ¥3,432（5-Fold CV） |
 
 # ① 継続・離脱分析
 
 ## 全体の継続率
 
 ```{r}
+# ── 全体の継続率の集計 ────────────────────────────────
+# 継続・離脱それぞれの人数と割合を計算
+
 cont_rate <- users %>%
+  # 継続フラグ別に人数をカウント
   count(continued_lbl) %>%
+
+  # 割合を計算
+  # pct = 各グループの人数 / 全体の人数
   mutate(pct = n / sum(n))
 
-ggplot(cont_rate, aes(x = "", y = pct, fill = continued_lbl)) +
-  geom_col(width = 0.5, color = "white", linewidth = 1.0) +
-  geom_text(aes(label = percent(pct, 1)),
-            position = position_stack(vjust = 0.5),
-            color = 'white') +
+# ── 横棒グラフで可視化 ───────────────────────────────
+ggplot(cont_rate,
+       aes(x = "",           
+           y = pct,         
+           fill = continued_lbl)) +  
+
+  # 棒グラフ
+  geom_col(
+    width     = 0.5,   
+    color     = "white", 
+    linewidth = 1.0     
+  ) +
+
+  # 棒の中にテキストを表示
+  geom_text(
+    aes(label = percent(pct, 1)), 
+    position = position_stack(vjust = 0.5),
+    color    = "white",    # 文字色を白に
+    size     = 5           
+  ) +
+
+  # y軸を%表示に変換
   scale_y_continuous(labels = percent) +
-  labs(title = "入会30日後の継続・離脱率",
-       x = NULL, y = NULL, fill = NULL) 
+
+  labs(
+    title = "入会30日後の継続・離脱率",
+    x     = NULL,   
+    y     = NULL,   
+    fill  = NULL   
+  )
 ```
 
 ```{r}
+# ── 継続・離脱の内訳テーブル ──────────────────────────
 cont_rate %>%
+  # pctを%文字列に変換（表示用）
   mutate(pct = percent(pct, 0.1)) %>%
-  rename(ステータス = continued_lbl, 人数 = n, 割合 = pct) %>%
-  kable(caption = "継続・離脱 内訳") 
+
+  # 列名を日本語に変更（レポート用）
+  rename(
+    ステータス = continued_lbl,
+    人数       = n,
+    割合       = pct
+  ) %>%
+  kable(caption = "継続・離脱 内訳")
 
 ```
+
+> **【全体の継続率】解釈**
+>
+> 入会から30日後の継続率は**30%（60人）**、 離脱率は**70%（140人）**であった。
+>
+> 約7割のユーザーが30日以内に離脱しており、 **離脱防止が最優先の経営課題**であることがわかる。
 
 ## 属性別の継続率
 
 ```{r}
+# ── 属性別継続率を描画する関数 ────────────────────────
+# 同じ処理を性別・年齢層・目的・エリアの4回行うため
+
+# 引数:
+# data  = 使用するデータフレーム（users）
+# var   = グループ化する変数名（例: "gender_lbl"）
+# label = グラフタイトルに使う日本語名（例: "性別"）
+
 plot_cont_by <- function(data, var, label) {
   data %>%
+    # 指定した変数と継続フラグでグループ化
     group_by(.data[[var]], continued_lbl) %>%
+
+    # グループ別の人数をカウント
     summarise(n = n(), .groups = "drop") %>%
+
+    # 各カテゴリ内での割合を計算
     group_by(.data[[var]]) %>%
     mutate(pct = n / sum(n)) %>%
+
+    # 継続者の割合のみを抽出
     filter(continued_lbl == "継続") %>%
-    ggplot(aes(x = fct_reorder(.data[[var]], pct), y = pct)) +
+
+    # 継続率の高い順に並べて横棒グラフを作成
+    ggplot(aes(
+      x = fct_reorder(.data[[var]], pct), # 継続率順に並べる
+      y = pct
+    )) +
     geom_col(fill = PALETTE[1], alpha = 0.85) +
-    geom_text(aes(label = percent(pct, 1)), hjust = -0.1, size = 3.8) +
-    coord_flip() +
-    scale_y_continuous(labels = percent, limits = c(0, 1)) +
-    labs(title = paste(label, "別継続率"), x = NULL, y = "継続率")
+
+    # バーの右端に%ラベルを表示
+    geom_text(
+      aes(label = percent(pct, 1)),
+      hjust = -0.1,  # ラベルを棒の右側に少しずらす
+      size  = 3.8
+    ) +
+    coord_flip() +   # 横棒グラフに変換
+    scale_y_continuous(
+      labels = percent,
+      limits = c(0, 1)  # 0%〜100%の範囲で表示
+    ) +
+    labs(
+      title = paste(label, "別継続率"), # 例: "性別別継続率"
+      x     = NULL,
+      y     = "継続率"
+    )
 }
 
+# ── 4つの属性別グラフを作成 ──────────────────────────
 p1 <- plot_cont_by(users, "gender_lbl",  "性別")
 p2 <- plot_cont_by(users, "age_group",   "年齢層")
 p3 <- plot_cont_by(users, "purpose_lbl", "目的")
 p4 <- plot_cont_by(users, "area_name",   "居住エリア")
 
+# ── 2列×2行のグリッドで表示 ──────────────────────────
 gridExtra::grid.arrange(p1, p2, p3, p4, ncol = 2)
 ```
+
+> **【属性別継続率】解釈**
+>
+> **性別:** 女性（32%）が男性（28%）より わずかに継続率が高いが、 差は小さく性別による影響は限定的である。
+>
+> **年齢層:** 30〜34歳の継続率が26%と最も低く、 仕事・育児で多忙な世代の離脱が目立つ。 一方25〜29歳・〜24歳は33%と比較的高い。
+>
+> **目的:** 健康志向（33%）が最も継続率が高く、 ボディメイク（29%）が最も低い。 ボディメイクは短期的な目標達成後に 離脱するケースが多いと考えられる。
+>
+> **居住エリア:** 四国地方・北海道地方が50%と突出して高い。 関東地方・九州地方は30%と低く、 都市部での競合他社の影響が 考えられる。
 
 ## トレーニング行動と継続の関係
 
 ```{r}
-train_cont <- master %>%
-  filter(!is.na(gym_visits)) %>%
-  select(continued_lbl, aerobic, calorie_ctrl, trainer,
-         gym_visits, gym_hours) %>%
-  mutate(trainer = factor(trainer, labels = c("未利用","利用")))
+# ── トレーニング行動と継続の関係 ──────────────────────
+# 継続者と離脱者のトレーニング行動の違いを
+# 箱ひげ図で比較する
 
-# ジム来館回数
+# ── 分析用データの準備 ────────────────────────────────
+train_cont <- master %>%
+
+  # トレーニングログがあるユーザーのみ抽出
+  # gym_visitsがNAのユーザーは除外
+  filter(!is.na(gym_visits)) %>%
+
+  # 分析に必要な列のみ選択
+  select(continued_lbl, aerobic, calorie_ctrl,
+         trainer, gym_visits, gym_hours) %>%
+
+  # トレーナー利用フラグを文字列に変換
+  # 0 → "未利用", 1 → "利用"
+  mutate(trainer = factor(
+    trainer,
+    labels = c("未利用", "利用")
+  ))
+
+# ── ① ジム来館回数の比較 ─────────────────────────────
+# 継続者 vs 離脱者のジム来館回数の分布を比較
+
 p_visits <- ggplot(train_cont, aes(x = continued_lbl, y = gym_visits,
                                     fill = continued_lbl)) +
   geom_boxplot(alpha = 0.8, outlier.shape = 21) +
@@ -314,7 +417,7 @@ p_visits <- ggplot(train_cont, aes(x = continued_lbl, y = gym_visits,
   labs(title = "ジム来館回数", x = NULL, y = "回数", fill = NULL) +
   theme(legend.position = "none")
 
-# ジム滞在時間
+# ── ② ジム合計滞在時間の比較 ─────────────────────────
 p_hours <- ggplot(train_cont, aes(x = continued_lbl, y = gym_hours,
                                    fill = continued_lbl)) +
   geom_boxplot(alpha = 0.8, outlier.shape = 21) +
@@ -322,7 +425,7 @@ p_hours <- ggplot(train_cont, aes(x = continued_lbl, y = gym_hours,
   labs(title = "ジム合計滞在時間", x = NULL, y = "分", fill = NULL) +
   theme(legend.position = "none")
 
-# トレーナー利用率
+# ── ③ トレーナー利用率の比較 ─────────────────────────
 p_trainer <- train_cont %>%
   count(continued_lbl, trainer) %>%
   group_by(continued_lbl) %>%
@@ -336,7 +439,7 @@ p_trainer <- train_cont %>%
   labs(title = "トレーナー利用率", x = NULL, y = "割合", fill = NULL) +
   theme(legend.position = "none")
 
-# 有酸素運動
+# ── ④ 有酸素運動量の比較 ─────────────────────────────
 p_aerobic <- ggplot(train_cont, aes(x = continued_lbl, y = aerobic,
                                      fill = continued_lbl)) +
   geom_boxplot(alpha = 0.8, outlier.shape = 21) +
@@ -344,7 +447,7 @@ p_aerobic <- ggplot(train_cont, aes(x = continued_lbl, y = aerobic,
   labs(title = "有酸素運動量", x = NULL, y = "kcal", fill = NULL) +
   theme(legend.position = "none")
 
-# カロリー制限
+# ── ⑤ カロリー制限の比較 ─────────────────────────────
 p_calorie <- ggplot(train_cont, aes(x = continued_lbl, y = calorie_ctrl,
                                      fill = continued_lbl)) +
   geom_boxplot(alpha = 0.8, outlier.shape = 21) +
@@ -352,21 +455,35 @@ p_calorie <- ggplot(train_cont, aes(x = continued_lbl, y = calorie_ctrl,
   labs(title = "カロリー制限", x = NULL, y = "kcal", fill = NULL) +
   theme(legend.position = "none")
 
-gridExtra::grid.arrange(p_visits, p_hours, p_trainer, p_aerobic, p_calorie, ncol = 2)
+gridExtra::grid.arrange(p_visits, p_hours, p_trainer, p_aerobic, p_calorie, ncol = 2) # 2列配置
 ```
 
-**\>解釈**
+> **【トレーニング行動と継続の関係】解釈**
+>
+> **ジム来館回数:** 継続者の中央値は約11回、 離脱者は約6回と約2倍の差がある。 来館頻度が継続の重要な指標である。
+>
+> **ジム合計滞在時間:** 継続者の中央値は約1,300分、 離脱者は約700分と大きな差がある。 量だけでなく質（滞在時間）も重要である。
+>
+> **トレーナー利用率:** 継続者の77%がトレーナーを利用しているのに対し、 離脱者は53%にとどまる。 トレーナーとの関係構築が 継続に寄与している可能性がある。
+>
+> **有酸素運動量:** 継続者（中央値約2,000kcal）は 離脱者（約500kcal）の約4倍の 有酸素運動量を記録している。 後述の機械学習モデルでも 最重要変数として確認される。
+>
+> **カロリー制限:** 継続者の方がカロリー管理を 積極的に行っている傾向がある。 食事管理とジム継続の 相乗効果が示唆される。
+>
+> **総括:** 継続者と離脱者の最大の違いは 「運動量・滞在時間の多さ」であり、 単なる来館回数だけでなく 積極的なトレーニングへの 取り組み姿勢が継続を左右している。
 
-ジムへの来館回数、ジムの合計時間滞在時間、トレーナ利用率、そして有酸素運動量、全て数値が高いほど、継続率が高くなった。
-
-トレーナー利用とそのほか（ジム来館回数、滞在時間、有酸素運動、体重、体脂肪、筋肉量）の関係を見てみたが、特に顕著な関係はみられなかった。（例：トレーナー利用が高いとジムへの来館回数が増えた、などがなかった。）
-
-## 体の変化と継続の関係
+##  体の変化と継続の関係
 
 ```{r}
+# ── 体組成変化と継続の関係 ────────────────────────────
+# 入会から30日間の体組成変化（体重・体脂肪率・筋肉量）が
+# 継続・離脱にどう関係するかを箱ひげ図で比較する
+
+# ── 分析用データの準備 ────────────────────────────────
 body_cont <- master %>%
   select(continued_lbl, delta_weight, delta_bodyfat, delta_muscle)
 
+# ── ① 体重変化の比較 ─────────────────────────────────
 p_w <- ggplot(body_cont, aes(x = continued_lbl, y = delta_weight,
                                fill = continued_lbl)) +
   geom_boxplot(alpha = 0.8) +
@@ -374,14 +491,24 @@ p_w <- ggplot(body_cont, aes(x = continued_lbl, y = delta_weight,
   labs(title = "体重変化 (kg)", x = NULL, y = "Δkg", fill = NULL) +
   theme(legend.position = "none")
 
+# ── ② 体脂肪率変化の比較 ─────────────────────────────
+# delta_bodyfatは元データが非常に小さい値
+# → × 100 して%ポイントに変換して表示
 p_f <- ggplot(body_cont, aes(x = continued_lbl, y = delta_bodyfat * 100,
                                fill = continued_lbl)) +
   geom_boxplot(alpha = 0.8) +
   scale_fill_manual(values = rev(PALETTE)) +
-  coord_cartesian(ylim = c(-2, 2)) +  #  zoom in, ignores outlier
+  
+  # 外れ値を除外してズームイン
+  # scale_y_continuousと違い、外れ値を削除せず
+  # 表示範囲だけを変更する（箱の形状は変わらない）
+  coord_cartesian(ylim = c(-2, 2)) +
   labs(title = "体脂肪率変化", x = NULL, y = "Δ%", fill = NULL) +
   theme(legend.position = "none")
 
+# ── ③ 筋肉量変化の比較 ───────────────────────────────
+# 継続者 vs 離脱者の筋肉量変化を比較
+# delta_muscle: プラス=筋肉増加, マイナス=筋肉減少
 p_m <- ggplot(body_cont, aes(x = continued_lbl, y = delta_muscle,
                                fill = continued_lbl)) +
   geom_boxplot(alpha = 0.8) +
@@ -392,30 +519,76 @@ p_m <- ggplot(body_cont, aes(x = continued_lbl, y = delta_muscle,
 gridExtra::grid.arrange(p_w, p_f, p_m, ncol = 3)
 ```
 
-\>**解釈**
-
-体重、体脂肪が減少した減っている方が継続率が高い。筋肉量は増加している方が継続率が高い。
+> **【体組成変化と継続の関係】解釈**
+>
+> **体重変化:** 継続者・離脱者ともに体重変化は ほぼ0kg付近に集中しており、 大きな差は見られない。 体重変化だけでは継続・離脱を 区別することは難しい。
+>
+> **体脂肪率変化:** 離脱者の体脂肪率は増加傾向であるのに対し、 継続者は減少傾向である。 体脂肪が減少しているユーザーは トレーニングの成果を実感しやすく 継続につながっている可能性がある。
+>
+> **筋肉量変化:** 継続者の筋肉量変化の中央値は約+0.1kgと わずかに増加しているのに対し、 離脱者は約-0.2kgと減少傾向にある。 筋肉量の増加はトレーニング効果の 実感につながり、継続率を高める 可能性がある。
+>
+> **総括:** 体重よりも**体脂肪率の減少**と **筋肉量の増加**が継続と関連している。 入会初期に体組成の改善を実感させる プログラムが継続率向上に効果的と考えられる。 → 月1回の体組成測定の義務化と アプリでの変化の可視化を推奨する。
 
 ## ① 施策提案 {.callout-note}
 
 ::: {.callout-tip title="継続者増加に向けた施策提案"}
-全体の継続率はわずか30%（60人）であり、 70%（140人）が30日以内に離脱している。 離脱防止が最優先課題である。
+全体の継続率はわずか**30%（60人）**であり、 **70%（140人）**が30日以内に離脱している。 離脱防止が最優先課題である。
 
-**A トレーナーフォローアップの強化**\
-トレーナーを利用したユーザーは継続率が顕著に高い。\
-→ 初月レクチャー後も月1回のトレーナー面談を標準メニュー化。
+------------------------------------------------------------------------
 
-**B ジム来館頻度の促進**\
-継続者は離脱者よりも来館回数・滞在時間が多い。\
-→ 週3回以上来館者へのポイント還元・目標達成バッジ制度を導入。
+**A. トレーナーフォローアップの強化**
 
-**C 入会直後の30～34歳の離脱が最も多い。** → 仕事・育児で忙しい世代向けに短時間プログラムを整備。
+トレーナーを利用した継続者は77%、 離脱者は53%とトレーナー利用率に大きな差がある。
 
-**D エリア別マーケティングの強化** 四国地方・北海道地方の継続率が50%と最も高い一方、 関東地方・九州地方は30%と低い。 → 都市部ユーザー向けに柔軟な通い方（オンライン併用）を提供。
+→ 初月レクチャー後も**月1回のトレーナー面談**を 標準メニュー化し、継続的なサポートを提供する。
 
-**E 男性ユーザーへの重点施策** 女性（32%）より男性（28%）の継続率が低い。 → 男性向けに筋力・体型変化を数値で見える化する
+------------------------------------------------------------------------
 
-**F 有酸素運動プログラムの充実** 継続者の有酸素運動量は離脱者と比べて 大幅に高い。 → ランニングマシン・バイクの使い方講習を 入会1週目に実施
+**B. ジム来館頻度・滞在時間の促進**
+
+継続者の来館回数（中央値11回）は 離脱者（6回）の約2倍である。
+
+→ **週3回以上来館者へのポイント還元**・ 目標達成バッジ制度を導入し来館を促進する。
+
+------------------------------------------------------------------------
+
+**C. 30〜34歳向けの特別プログラム**
+
+30〜34歳の継続率が26%と全年齢層で最も低く、 仕事・育児で多忙な世代の離脱が目立つ。
+
+→ **短時間（30分）集中プログラム**を整備し、 忙しい世代でも通いやすい環境を作る。
+
+------------------------------------------------------------------------
+
+**D. エリア別マーケティングの強化**
+
+四国地方・北海道地方の継続率が50%と高い一方、 関東地方・九州地方は30%と低い。
+
+→ 都市部ユーザー向けに**オンライン併用プラン**を 提供し、通いにくい環境をカバーする。
+
+------------------------------------------------------------------------
+
+**E. 男性ユーザーへの重点施策**
+
+女性（32%）より男性（28%）の継続率が低い。
+
+→ 男性向けに**筋力・体型変化を数値で見える化**する 進捗レポート機能を導入する。
+
+------------------------------------------------------------------------
+
+**F. 有酸素運動プログラムの充実**
+
+継続者の有酸素運動量は離脱者と比べて 約4倍と大幅に高い（最重要変数）。
+
+→ **ランニングマシン・バイクの使い方講習**を 入会1週目に実施し、有酸素運動習慣を定着させる。
+
+------------------------------------------------------------------------
+
+**G. 体組成変化の見える化**
+
+継続者は体脂肪率が減少・筋肉量が増加する傾向がある。
+
+→ **月1回の体組成測定を必須化**し、 アプリで変化をグラフ表示して モチベーション維持につなげる。
 :::
 
 ------------------------------------------------------------------------
@@ -425,19 +598,61 @@ gridExtra::grid.arrange(p_w, p_f, p_m, ncol = 3)
 ## 購入金額の分布
 
 ```{r}
+# ── 購入金額の分布 ────────────────────────────────────
+# 入会から30日以内の累計購入金額の分布を
+# ヒストグラムで可視化する
+
 ggplot(users, aes(x = total_purchase)) +
-  geom_histogram(binwidth = 1000, fill = PALETTE[1], color = "white", alpha = 0.85) +
-  geom_vline(xintercept = mean(users$total_purchase), linetype = "dashed",
-             color = PALETTE[2], linewidth = 1) +
-  annotate("text",
-           x = mean(users$total_purchase) + 300,
-           y = Inf, vjust = 1.5,
-           label = paste0("平均 ", comma(round(mean(users$total_purchase))), "円"),
-           color = PALETTE[2], size = 4) +
+
+  # binwidth = 1000 → 1,000円刻みで集計
+  geom_histogram(
+    binwidth = 1000,
+    fill     = PALETTE[1],  
+    color    = "white",     
+    alpha    = 0.85         
+  ) +
+
+  # 平均値の縦線を追加
+  # linetype = "dashed" → 破線
+  geom_vline(
+    xintercept = mean(users$total_purchase),
+    linetype   = "dashed",
+    color      = PALETTE[2],  # オレンジ色
+    linewidth  = 1
+  ) +
+
+  # 平均値のテキストラベルを追加
+  annotate(
+    "text",
+    x     = mean(users$total_purchase) + 4500,
+    y     = Inf,
+    vjust = 1.5,
+    label = paste0(
+      "平均 ",
+      comma(round(mean(users$total_purchase))),
+      "円"
+    ),
+    color = PALETTE[2],
+    size  = 4
+  ) +
+
+  # x軸を3桁区切り（例: 10,000）で表示
   scale_x_continuous(labels = comma) +
-  labs(title = "入会30日以内の累計購入金額分布",
-       x = "累計購入金額（円）", y = "ユーザー数")
+
+  labs(
+    title = "入会30日以内の累計購入金額分布",
+    x     = "累計購入金額（円）",
+    y     = "ユーザー数"
+  )
 ```
+
+> **【購入金額分布】解釈**
+>
+> 累計購入金額の平均は**5,387円**であるが、 分布を見ると**0円のユーザーが最も多く**、 購入者と未購入者の二極化が見られる。
+>
+> 購入金額は0円〜40,000円以上まで 広く分布しており、 標準偏差（7,914円）が平均を大きく上回ることから ユーザー間のばらつきが非常に大きい。
+>
+> → 未購入ユーザーへの初回購買促進が 売上向上の最優先課題である。
 
 ## 属性別の平均購入金額
 
@@ -466,208 +681,525 @@ gridExtra::grid.arrange(p1, p2, p3, p4, ncol = 2)
 ## トレーニング行動と購入金額の相関
 
 ```{r}
-train_purch <- master %>%
-  filter(!is.na(gym_visits)) %>%
-  mutate(trainer_lbl = factor(trainer, labels = c("トレーナー未利用","トレーナー利用")))
+# ── 属性別の平均購入金額 ──────────────────────────────
+# 性別・年齢層・目的・居住エリア別に
+# 平均購入金額を比較する横棒グラフを作成する
 
-p_v <- ggplot(train_purch, aes(x = gym_visits, y = total_purchase)) +
-  geom_point(aes(color = trainer_lbl), alpha = 0.6, size = 2) +
-  geom_smooth(method = "lm", se = TRUE, color = "black", linewidth = 0.8) +
-  scale_y_continuous(labels = comma) +
-  scale_color_manual(values = PALETTE) +
-  labs(title = "ジム来館回数 vs 購入金額",
-       x = "来館回数", y = "累計購入金額（円）", color = NULL)
 
-p_h <- ggplot(train_purch, aes(x = gym_hours, y = total_purchase)) +
-  geom_point(aes(color = trainer_lbl), alpha = 0.6, size = 2) +
-  geom_smooth(method = "lm", se = TRUE, color = "black", linewidth = 0.8) +
-  scale_y_continuous(labels = comma) +
-  scale_color_manual(values = PALETTE) +
-  labs(title = "ジム滞在時間 vs 購入金額",
-       x = "合計滞在時間（分）", y = "累計購入金額（円）", color = NULL)
+plot_purchase_by <- function(data, var, label) {
+  data %>%
+    # 指定した変数でグループ化
+    group_by(.data[[var]]) %>%
 
-gridExtra::grid.arrange(p_v, p_h, ncol = 1)
+    # グループ別の平均購入金額を計算
+    summarise(
+      mean_purchase = mean(total_purchase, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+
+    # 平均購入金額の高い順に並べて横棒グラフを作成
+    ggplot(aes(
+      x = fct_reorder(.data[[var]], mean_purchase),
+      y = mean_purchase
+    )) +
+    geom_col(fill = "#4CAF50", alpha = 0.85) +
+
+    # バーの右端に金額ラベルを表示
+    # comma()で3桁区切り（例: 5,573）
+    geom_text(
+      aes(label = paste0(comma(round(mean_purchase)), "円")),
+      hjust = -0.05,  # ラベルをバーの右側に少しずらす
+      size  = 3.5
+    ) +
+
+    coord_flip() +  # 横棒グラフに変換
+
+    # x軸の範囲を設定
+    # max * 0.8 → ラベルが見切れないよう余白を確保
+    scale_y_continuous(
+      labels = comma,
+      limits = c(0, max(data$total_purchase) * 0.8)
+    ) +
+
+    labs(
+      title = paste(label, "別平均購入金額"),
+      x     = NULL,
+      y     = "平均購入金額（円）"
+    )
+}
+
+# ── 4つの属性別グラフを作成 ──────────────────────────
+p1 <- plot_purchase_by(users, "gender_lbl",  "性別")
+p2 <- plot_purchase_by(users, "age_group",   "年齢層")
+p3 <- plot_purchase_by(users, "purpose_lbl", "目的")
+p4 <- plot_purchase_by(users, "area_name",   "居住エリア")
+
+# ── 2列×2行のグリッドで表示 ──────────────────────────
+gridExtra::grid.arrange(p1, p2, p3, p4, ncol = 2)
 ```
+
+> **【属性別平均購入金額】解釈**
+>
+> **性別:** 男性（5,573円）が女性（5,222円）より わずかに高いが差は小さく、 性別による購入金額への影響は限定的である。
+>
+> **年齢層:** 25〜29歳（5,734円）が最も高く、 〜24歳（4,536円）が最も低い。 若年層は購買力が低い傾向があり、 学生向けの割引施策が有効と考えられる。
+>
+> **目的:** 健康志向（6,824円）が最も高く、 ボディメイク（4,405円）が最も低い。 健康志向ユーザーはサプリ・グッズへの 投資意識が高いと考えられる。 ボディメイクユーザーへの購買促進施策が 売上向上の余地として存在する。
+>
+> **居住エリア:** 北海道地方（14,940円）が突出して高く、 他エリアの平均（約4,500円）の 約3倍の購入金額を記録している。 一方、東北地方（1,425円）・中国地方（2,390円） が低く、エリア間の差が非常に大きい。
+>
+> **総括:** エリアによる購入金額の差が最も大きく、 北海道地方への重点施策が 売上向上に最も効果的である。 また健康志向ユーザーの高購買傾向を活かした クロスセル施策も有効である。
 
 ## 商品カテゴリ別売上構成
 
 ```{r}
-purchase_detail <- purchase %>%
-  left_join(products %>% select(product_id, product_name, category), by = "product_id")
+# ── 商品カテゴリ別売上構成 ────────────────────────────
 
+# ── Step 1: 購入ログに商品情報を結合 ─────────────────
+purchase_detail <- purchase %>%
+  # 商品マスタから必要な列のみ選択して結合
+  # product_id をキーに商品名・カテゴリを追加
+  left_join(
+    products %>% select(product_id, product_name, category),
+    by = "product_id"
+  )
+
+# ── Step 2: カテゴリ別に売上を集計 ───────────────────
 cat_summary <- purchase_detail %>%
   group_by(category) %>%
   summarise(
-    total_amount = sum(amount),
-    order_count  = n(),
-    .groups = "drop"
+    total_amount = sum(amount),  # カテゴリ別売上合計
+    order_count  = n(),          # カテゴリ別注文件数
+    .groups      = "drop"
   ) %>%
+
+  # 各カテゴリの売上構成比を計算
+  # pct = カテゴリ売上 / 全体売上
   mutate(pct = total_amount / sum(total_amount))
 
-ggplot(cat_summary, aes(x = fct_reorder(category, total_amount), y = total_amount,
-                         fill = category)) +
+# ── Step 3: 横棒グラフで可視化 ───────────────────────
+ggplot(
+  cat_summary,
+  aes(
+    x    = fct_reorder(category, total_amount), # 売上順に並べる
+    y    = total_amount,
+    fill = category  # カテゴリ別に色分け
+  )
+) +
   geom_col(alpha = 0.85) +
-  geom_text(aes(label = paste0(comma(total_amount), "円\n(",
-                                percent(pct, 1), ")")),
-            hjust = -0.05, size = 3.5) +
-  coord_flip() +
-  scale_y_continuous(labels = comma,
-                     limits = c(0, max(cat_summary$total_amount) * 1.35)) +
+
+  # バーの右端に売上金額と構成比を表示
+  geom_text(
+    aes(label = paste0(
+      comma(total_amount), "円\n",  # 売上金額（改行）
+      "(", percent(pct, 1), ")"     # 構成比
+    )),
+    hjust = -0.05,  # バーの右側に少しずらす
+    size  = 3.5
+  ) +
+
+  coord_flip() +  # 横棒グラフに変換
+
+  scale_y_continuous(
+    labels = comma,
+    limits = c(0, max(cat_summary$total_amount) * 1.35)
+  ) +
+
+  # カテゴリ別に色を自動設定
   scale_fill_brewer(palette = "Set2") +
-  labs(title = "カテゴリ別売上合計",
-       x = NULL, y = "売上（円）", fill = "カテゴリ") +
-  theme(legend.position = "none")
+
+  labs(
+    title = "カテゴリ別売上合計",
+    x     = NULL,
+    y     = "売上（円）",
+    fill  = "カテゴリ"
+  ) +
+  theme(legend.position = "none")  
 ```
+
+> **【商品カテゴリ別売上構成】解釈**
+>
+> **売上構成:**
+>
+> | カテゴリ     | 売上合計        | 構成比   |
+> |--------------|-----------------|----------|
+> | サプリメント | 760,340円       | 71%      |
+> | グッズ       | 292,200円       | 27%      |
+> | ウェア       | 24,800円        | 2%       |
+> | **合計**     | **1,077,340円** | **100%** |
+>
+> **サプリメント**が売上の**71%**を占める 圧倒的な主力カテゴリである。 プロテイン・EAA・マルチビタミンなどの 消耗品が繰り返し購入されるため、 高い売上を維持していると考えられる。
+>
+> **グッズ**は27%と2位だが、 トレーニングマット・腹筋ローラーなど 一度購入すると再購入が少ない商品が中心である。
+>
+> **ウェア**はわずか2%（24,800円）と 極めて低い。 ウェアはジム外でも購入できるため、 ジムでの購買動機が薄いと考えられる。
+>
+> **【施策への示唆】** サプリメントの売上強化が最優先である。 特に消耗品のリピート購入を促進するため、 定期購入割引・まとめ買い割引の 導入が効果的である。 ウェアは売上が低いため、 ジム限定カラー・メンバー割引など ジムならではの付加価値をつけることで 購買動機を高める工夫が必要である。
 
 ```{r}
+# ── 商品別売上ランキング ──────────────────────────────
+# 商品名・カテゴリ別に注文数と売上合計を集計しテーブル形式で表示する
+
 purchase_detail %>%
+  # 商品名とカテゴリでグループ化
   group_by(product_name, category) %>%
+
   summarise(
-    注文数   = n(),
-    売上合計 = sum(amount),
+    注文数   = n(),          # 商品別の注文件数
+    売上合計 = sum(amount),  # 商品別の売上合計（円）
     .groups  = "drop"
   ) %>%
+
+  # 注文数の多い順に並べ替え
   arrange(desc(注文数)) %>%
-  rename(商品名 = product_name, カテゴリ = category) %>%
-  kable(
-    format      = "html",              # ← force HTML ✅
-    caption     = "商品別売上ランキング",
-    format.args = list(big.mark = ","),
-    align       = c("l","l","r","r")
+
+  # 列名を日本語に変更（レポート用）
+  rename(
+    商品名   = product_name,
+    カテゴリ = category
   ) %>%
+
+  # HTMLテーブルとして表示
+  kable(
+    format      = "html",              # HTML形式で出力
+    caption     = "商品別売上ランキング",
+    format.args = list(big.mark = ","), # 数値を3桁区切りに
+    align       = c("l","l","r","r")   # 左左右右で整列
+  ) %>%
+
   kable_styling(
-    bootstrap_options = c("striped","hover","bordered"),
-    full_width        = FALSE,
-    position          = "left"
-  ) 
+    bootstrap_options = c("striped",  # 行を交互に色付け
+                          "hover",    # マウスオーバーでハイライト
+                          "bordered"),# 罫線を追加
+    full_width = FALSE,  # テーブル幅を内容に合わせる
+    position   = "left"  # テーブルを左寄せ
+  )
 ```
 
-## ② 施策提案 {.callout-note}
+> **【商品別売上ランキング】解釈**
+>
+> **注文数ランキング:**
+>
+> | 順位 | 商品名               | 注文数 | 売上合計  |
+> |------|----------------------|--------|-----------|
+> | 1位  | プロテイン(1kg)      | 99件   | 376,200円 |
+> | 2位  | プロテインシェイカー | 78件   | 76,440円  |
+> | 3位  | 腹筋ローラー         | 48件   | 91,200円  |
+> | 4位  | マルチビタミン       | 38件   | 95,000円  |
+> | 5位  | EAA                  | 37件   | 155,400円 |
+>
+> **注目点①: プロテイン(1kg)が最多注文** 注文数99件と圧倒的な1位だが、 売上合計は376,200円（単価3,800円）である。 プロテイン(3kg)（単価9,800円）への アップセルで客単価向上が期待できる。
+>
+> **注目点②: EAAの高い売上効率** 注文数37件と5位だが 売上合計155,400円（単価4,200円）は 注文数2位のシェイカー（76,440円）の 約2倍である。 EAAはプロテイン購入者への クロスセル商品として効果的である。
+>
+> **注目点③: プロテインシェイカーの低単価** 注文数78件と2位だが 単価980円のため売上は76,440円と低い。 シェイカーはプロテイン購入時の セット販売で自然に売れている 可能性が高い。
+>
+> **注目点④: グッズの高額商品** トレーニングベルト（89,000円）は 注文数10件だが単価8,900円と高く、 少数でも高売上を生む商品である。 コンディションガン（単価7,900円）も 同様の高単価商品として注目すべきである。
+>
+> **【施策への示唆】** プロテイン(1kg)購入者に対して: → プロテイン(3kg)へのアップセル → EAA・マルチビタミンのクロスセル → シェイカーのセット販売 を組み合わせることで 客単価の大幅な向上が期待できる。
 
-::: {.callout-tip title="商品販売売上向上に向けた施策提案"}
-**A サプリメントのクロスセル強化**\
-売上の過半数をサプリメントが占める。プロテイン購入者にシェイカー・ビタミンをセット提案。\
-→ 入会時「スターターセット（プロテイン＋シェイカー＋クレアチン）」割引バンドル導入。
+## ② 施策提案
 
-**B トレーナー利用者への商品提案**\
-トレーナー利用者は購入金額が高い傾向。\
-→ トレーナーが食事・サプリを個別提案する「アドバイスカード」制度を設置。
+::: {.callout-tip title="② 商品販売売上向上に向けた施策提案"}
+**A. サプリメントのクロスセル強化**
 
-**C 来館頻度連動のレコメンド通知**\
-来館回数・滞在時間と購入額に正の相関。\
-→ 週3回以上来館者にアプリからサプリ・グッズのプッシュ通知を配信。
+売上の71%をサプリメントが占める主力カテゴリ。 プロテイン購入者にシェイカー・ビタミンをセット提案。
 
-**D 購入ゼロユーザーへの初回購買促進**
-累計購入金額が0円のユーザーが最も多く、購入経験者と未経験者の二極化が見られる。
-→ 入会時に500円クーポンを配布し、初回購買のハードルを下げる。
+→ 入会時「**スターターセット** （プロテイン＋シェイカー＋クレアチン）」 割引バンドルを導入し、初回購買単価を向上させる。
 
-**E 若年層（～24歳）への購買促進**
-～24歳の平均購入金額が4,536円と全年齢層で最も低い。
-→ 学生割引・SNSシェアキャンペーンで、若年層の購買意欲を刺激する。
+------------------------------------------------------------------------
 
-**F トレーナー未利用者への購買促進**
-トレーナー未利用者（青点）は購入金額が全体的に低い傾向。
-→ トレーナー未利用者へサプリ無料サンプルを配布し、購買のきっかけを作る。
+**B. トレーナー利用者への商品提案**
 
-**G プロテイン(3kg)の販売強化**
-プロテイン(1kg)は注文数99件と最も売れているが、3kgは注文数1件のみ。
-→ 1kg購入者へ3kgの割引オファーを送り大容量版への購買を促進する。
+トレーナー利用者は購入金額が高い傾向。 トレーナーが食事・サプリを個別提案する機会として活用。
+
+→ トレーナーが推奨商品を記載する **「アドバイスカード」制度**を設置し、 購買のきっかけを作る。
+
+------------------------------------------------------------------------
+
+**C. 来館頻度連動のレコメンド通知**
+
+来館回数・滞在時間と購入金額に正の相関がある。 積極的に来館するユーザーほど購買意欲が高い。
+
+→ **週3回以上来館者**にアプリから サプリ・グッズのプッシュ通知を配信し、 購買タイミングを逃さない。
+
+------------------------------------------------------------------------
+
+**D. 購入ゼロユーザーへの初回購買促進**
+
+累計購入金額が0円のユーザーが最も多く、 購入経験者と未経験者の二極化が見られる。
+
+→ 入会時に**500円クーポン**を配布し、 初回購買のハードルを下げる。 一度購入したユーザーは リピート購入につながりやすい。
+
+------------------------------------------------------------------------
+
+**E. 若年層（〜24歳）への購買促進**
+
+〜24歳の平均購入金額が4,536円と 全年齢層で最も低い。
+
+→ **学生割引・SNSシェアキャンペーン**で 若年層の購買意欲を刺激する。 口コミ効果による新規顧客獲得も期待できる。
+
+------------------------------------------------------------------------
+
+**F. トレーナー未利用者への購買促進**
+
+トレーナー未利用者（青点）は 購入金額が全体的に低い傾向。
+
+→ トレーナー未利用者へ **サプリ無料サンプル**を配布し、 購買のきっかけを作る。
+
+------------------------------------------------------------------------
+
+**G. プロテイン(3kg)の販売強化**
+
+プロテイン(1kg)は注文数99件と最も売れているが、 3kgは注文数1件のみ。 3kgの単価（9,800円）は1kgの約2.6倍である。
+
+→ 1kg購入者へ3kgの**割引オファー**を送り、 大容量版へのアップセルを促進する。 → 「1kgを3回買うより3kgが得！」という メッセージングが効果的である。
+
+------------------------------------------------------------------------
+
+**H. EAAのクロスセル強化**
+
+EAAは注文数37件だが売上155,400円と 注文数2位のシェイカー（76,440円）の 約2倍の売上を誇る高単価商品。
+
+→ プロテイン購入者へEAAを **セット割引**で提案し、 客単価をさらに向上させる。
 :::
 
 ------------------------------------------------------------------------
 
 # ③ 継続率予測モデル
 
-## データ準備
+### データ準備
 
 ```{r}
-# Keep only the columns we need
+# ══════════════════════════════════════════════════
+# ③ 継続率予測モデル
+# 目的: 入会から30日以内のデータから
+#       30日後の継続・離脱を予測する
+#       2値分類モデルを構築する
+# アルゴリズム: Random Forest
+# 評価方法:    5-Fold Cross Validation
+# 評価指標:    AUC（ROC曲線の面積）
+# ══════════════════════════════════════════════════
+
+# ── モデル用データの準備 ──────────────────
+# masterテーブルから予測に使う列のみ選択する
+# 選択基準: 入会30日以内に取得できるデータのみ使用
+
 model_data <- master %>%
+
   mutate(
-    # Fill missing values with 0
+    # 欠損値（NA）を0で補完
+    # 理由: Random Forestはデフォルトでは
+    #       NAを扱えないため事前に補完が必要
+    # 解釈: トレーニングログがないユーザーは
+    #       「来館0回・運動0kcal」として扱う
     gym_visits = replace_na(gym_visits, 0),
     gym_hours  = replace_na(gym_hours,  0),
     trainer    = replace_na(trainer,    0),
     aerobic    = replace_na(aerobic,    0)
   ) %>%
-  select(continued, gym_visits, gym_hours,trainer,aerobic,age,total_purchase) %>%
+
+  # 予測に使う特徴量（説明変数）と
+  # 予測対象（目的変数）を選択
+  select(
+    continued,      # 目的変数: 継続=1, 離脱=0
+    gym_visits,     # 特徴量: ジム来館回数
+    gym_hours,      # 特徴量: ジム合計滞在時間
+    trainer,        # 特徴量: トレーナー利用フラグ
+    aerobic,        # 特徴量: 有酸素運動量
+    age,            # 特徴量: 年齢
+    total_purchase  # 特徴量: 累計購入金額
+  ) %>%
+
   mutate(
-    continued = factor(continued,
-                       levels = c(0, 1),
-                       labels = c("離脱", "継続")) # ラベルを付与
+    # continuedを数値→因子型に変換
+    # 理由: Random Forestに「これは分類問題」と伝えるため
+    # levels: 0=離脱, 1=継続 の順序を明示
+    # labels: グラフ・出力で表示する文字列
+    continued = factor(
+      continued,
+      levels = c(0, 1),
+      labels = c("離脱", "継続")
+    )
   )
 
-# Check the data
+# データの確認
 cat("行数:", nrow(model_data), "\n")
 cat("継続:", sum(model_data$continued == "継続"), "\n")
 cat("離脱:", sum(model_data$continued == "離脱"), "\n")
 ```
 
-## Random Forest 回帰モデル（5-Ford cv)
+> **【データ準備の確認】**
+>
+> | 項目         | 値           |
+> |--------------|--------------|
+> | 総サンプル数 | 200人        |
+> | 継続         | 60人（30%）  |
+> | 離脱         | 140人（70%） |
+> | 特徴量数     | 6変数        |
+>
+> **クラス不均衡について:** 継続（30%）と離脱（70%）で サンプル数に偏りがある。 このような場合、精度（Accuracy）より **AUC**で評価する方が適切である。 AUCはクラス不均衡の影響を 受けにくい評価指標である。
+
+### Random Forest 分類モデル（5-Fold CV）
 
 ```{r}
+# ── Random Forest 分類モデルの構築 ────────
 set.seed(42)
+# Random Forestはランダムな要素を含むため
+# 同じ結果を再現するためにシードを固定する
 
 ctrl <- trainControl(
-  method          = "cv", #Cross validation
-  number          = 5, #number of fold
-  classProbs      = TRUE, #Calculate Probability
-  summaryFunction = twoClassSummary, # works for 2 categories
-  savePredictions = "final" # save this prediction
+  method          = "cv", # Cross Validation（交差検証）
+  number          = 5, # 5-Fold CV: データを5分割する
+  classProbs      = TRUE,  
+  # 予測結果を確率で出力する（例: 継続確率=82%）
+  # AUCの計算にはこの確率が必要なためTRUEにする
+
+  summaryFunction = twoClassSummary, # 2クラス分類（継続/離脱）用の評価関数
+  
+  savePredictions = "final" 
+  # 各Foldの予測結果を保存する
+  # → 後でROC曲線を描くために必要
 )
 
 rf_churn <- train(
-  continued ~ ., # ~:using .: All other columns
+  continued ~ ., # "~"using "." All other columns
   data      = model_data,
   method    = "rf", # Random Forest
   metric    = "ROC",
-  trControl = ctrl, # connects to trainControl() setting above
-  ntree     = 300, # number f the tree to build
-  tuneGrid  = data.frame(mtry = c(1, 2, 3, 4, 5, 6)) # Chose the best number of columd pick up
+  trControl = ctrl,   # 上で設定した交差検証のルールを適用
+  ntree     = 300, # 作成するRandom Treeの数
+  
+  tuneGrid  = data.frame(mtry = c(1, 2, 3, 4, 5, 6)) 
+  # mtry: 各分岐点でランダムに選ぶ特徴量の数
+  # 特徴量数=6なので1〜6を全て試す
+  # Rが自動的に最良のmtryを選択する
 )
 
 cat("Best mtry:", rf_churn$bestTune$mtry, "\n")
 ```
 
-## 正確度のチェック(AUC)
+### モデルの評価（AUC）
 
 ```{r}
-# Get prediction
+# ── モデルの評価（AUC） ───────────────────
+# 5-Fold CVの予測結果からAUCを計算する
+
+# ── 最良のmtryの予測結果を取得 ───────────────────
 preds <- rf_churn$pred %>%
   filter(mtry == rf_churn$bestTune$mtry)
-# Caluculate AUC
-roc_obj <- roc(response  = preds$obs,
-               predictor = preds$継続,
-               levels    = c("離脱","継続"))
 
-auc_val <- round(auc(roc_obj), 3) # Show 3 decimal points
-cat("AUC =", auc_val, "\n")
-```
+# ── ROCオブジェクトの作成 ─────────────────────────
+roc_obj <- roc(
+  response  = preds$obs,
+  # response: 実際の正解ラベル
 
-## ROC
+  predictor = preds$継続,
+  # predictor: 「継続」である予測確率
 
-```{r}
-roc_df <- data.frame(
-  specificity = rev(roc_obj$specificities),
-  sensitivity = rev(roc_obj$sensitivities)
+  levels    = c("離脱", "継続")
+  # levels: どちらを陰性（0）・陽性（1）とするか
 )
 
-ggplot(roc_df, aes(x = 1 - specificity, y = sensitivity)) +
-  geom_line(color = PALETTE[2], linewidth = 1.2) +
-  geom_abline(linetype = "dashed") +
-  annotate("text", x = 0.7, y = 0.15,
-           label = paste0("AUC = ", auc_val),
-           size = 5, fontface = "bold", color = PALETTE[1]) +
-  labs(title = "ROC曲線（5-Fold CV）",
-       subtitle = "継続・離脱の予測性能",
-       x = "偽陽性率 (1 - Specificity)",
-       y = "真陽性率 (Sensitivity)")
+
+# ── AUCの計算 ────────────────────────────────────
+auc_val <- round(auc(roc_obj), 3)
+
+# round(..., 3): 小数点3桁に丸める
+cat("AUC =", auc_val, "\n")
+
 ```
+
+### ROC曲線
+
+```{r}
+# ── ROC曲線用データの準備 ────────────────────────
+roc_df <- data.frame(
+  # roc_objから特異度・感度の値を取得
+  # rev()で逆順にして左下から右上への曲線にする
+
+  specificity = rev(roc_obj$specificities),
+  # specificity: 特異度
+  # = 離脱者を正しく「離脱」と予測できた割合
+  # x軸は (1 - specificity) = 偽陽性率
+
+  sensitivity = rev(roc_obj$sensitivities)
+  # sensitivity: 感度（真陽性率）
+  # = 継続者を正しく「継続」と予測できた割合
+  # y軸に使用
+)
+
+# ── ROC曲線の描画 ─────────────────────────────────
+ggplot(roc_df, aes(
+  x = 1 - specificity,  # 偽陽性率（x軸）
+  y = sensitivity        # 真陽性率（y軸）
+)) +
+
+  # ROC曲線本体
+  geom_line(
+    color     = PALETTE[2],  # オレンジ色
+    linewidth = 1.2
+  ) +
+
+  # 対角線（ランダム予測の基準線）
+  # この線より上にあるほど良いモデル
+  geom_abline(linetype = "dashed") +
+
+  # AUC値をグラフ内に表示
+  annotate(
+    "text",
+    x        = 0.7,      # グラフ右下に配置
+    y        = 0.15,
+    label    = paste0("AUC = ", auc_val),
+    size     = 5,
+    fontface = "bold",
+    color    = PALETTE[1]  # 青色
+  ) +
+
+  labs(
+    title    = "ROC曲線（5-Fold CV）",
+    subtitle = "継続・離脱の予測性能",
+    x        = "偽陽性率（1 - Specificity）",
+    y        = "真陽性率（Sensitivity）"
+  )
+```
+
+> **【ROC曲線・AUCの解釈】**
+>
+> **AUC = 0.968（5-Fold CV）**
+>
+> | AUC値     | 評価          |
+> |-----------|---------------|
+> | 0.5       | ランダム予測  |
+> | 0.7       | 許容範囲      |
+> | 0.8       | 良い          |
+> | 0.9       | 非常に良い    |
+> | **0.968** | **ほぼ完璧**  |
+>
+> **ROC曲線の読み方:** 曲線が左上に近いほど良いモデルである。 本モデルの曲線は開始直後から 真陽性率が0.90近くまで急上昇しており、 非常に少ない偽陽性率で 多くの継続者を正確に識別できている。
+>
+> **予測性能（Training性能）:** AUC = 0.968は非常に高い値であり、 モデルは継続・離脱ユーザーを 約97%の精度で正しく識別できる。
+>
+> **汎化性能（Generalization性能）:** 5-Fold CVにより、モデルは 学習に使用していない未知データに対しても 高い予測性能を維持することが確認された。 これにより過学習のリスクは低く、 実際の新規入会者への適用が期待できる。
+>
+> **ビジネスへの活用:** 入会2週間時点でこのモデルを適用することで、 離脱リスクの高いユーザーを早期に特定し、 トレーナー介入・特別プログラムの 優先的な提供が可能となる。
 
 ## 変数重要度
 
 ```{r}
+# ── 変数重要度の可視化 ────────────────────
+# どの特徴量が継続予測に最も貢献しているかを確認する
 varImp(rf_churn)$importance %>%
+  # varImp(): 各変数の重要度スコアを取得
+  # $importance: 重要度の数値テーブルを取り出す
+  # スコアは0〜100で正規化されている
+  # 最重要変数 = 100, 無関係な変数 = 0
+
+  # 行名（変数名）をoverallという列に変換
+  # rownames_to_column が必要な理由:
+  # varImp()の出力は変数名が行名として格納されているため
+  # ggplotで使うには列に変換する必要がある
+  
   rownames_to_column("feature") %>%
   arrange(desc(Overall)) %>%
   mutate(feature = recode(feature,
@@ -688,39 +1220,104 @@ varImp(rf_churn)$importance %>%
        x = NULL, y = "重要度")
 ```
 
-> **③継続率予測モデルの解釈**
+> **【変数重要度の解釈】**
 >
-> **変数重要度の解釈**
+> | 順位 | 変数           | 重要度 | 解釈           |
+> |------|----------------|--------|----------------|
+> | 1位  | 有酸素運動量   | 100    | 最重要変数     |
+> | 2位  | ジム滞在時間   | 60.5   | 2番目に重要    |
+> | 3位  | ジム来館回数   | 33.4   | 3番目に重要    |
+> | 4位  | 累計購入金額   | 33.2   | 購買意欲の指標 |
+> | 5位  | 年齢           | 6.7    | ほぼ無関係     |
+> | 6位  | トレーナー利用 | 0      | 予測に貢献せず |
 >
-> 継続予測において最も重要な変数は **有酸素運動量（重要度=100）**であり、 次いで**ジム滞在時間（60.5）**、 **ジム来館回数（33.4）**と続く。
+> **①有酸素運動量（重要度=100）が最重要:** 継続予測において最も重要な変数であり、 継続者と離脱者を最も明確に区別できる。 有酸素運動量が多いユーザーは トレーニングへの積極的な取り組みを示しており、 継続につながっていると考えられる。
 >
-> これらの結果から、継続するユーザーは 単にジムに来るだけでなく、 **積極的に運動している**ことが示唆される。
+> **②ジム滞在時間・来館回数（60.5/33.4）:** 滞在時間と来館回数も重要だが、 有酸素運動量ほどではない。 「来るだけ」より「積極的に運動する」ことが より重要であることを示している。
 >
-> 一方、**トレーナー利用（0）**は 予測にほぼ貢献していない。 これはトレーナー利用者・未利用者の 両方に継続者が存在するためと考えられる。
+> **③累計購入金額（33.2）:** 購入金額も継続の予兆として機能している。 商品を購入したユーザーはジムへの 投資意識が高く、継続しやすい傾向がある。
 >
-> **累計購入金額（33.2）**も重要度が高く、 商品を購入したユーザーは ジムへの投資意識が高く継続しやすい 傾向があると解釈できる。
+> **④トレーナー利用（重要度=0）の意外な結果:** ①の分析ではトレーナー利用率が 継続者（77%）と離脱者（53%）で大きく異なった。 しかし予測モデルでは重要度=0となった。
+>
+> これは「相関は因果を意味しない」 という統計学の重要な原則を示している。 トレーナー利用は有酸素運動量などの 他の変数で説明できてしまうため、 モデルにとって追加情報にならない。 トレーナー利用は継続の「原因」ではなく 運動熱心さという隠れた変数の 「結果」である可能性が高い。
+>
+> **【施策への示唆】** 継続率向上のために最も効果的な施策は トレーナー施策より**有酸素運動量を増やす**ことである。 → ランニングマシン・バイクの 積極的な活用を促すプログラムの整備 → 有酸素運動の目標設定・達成通知機能の導入 → 入会1週目の有酸素運動体験セッションの実施
 
-> **注目点**:
->
-> ①の分析では「トレーナー利用率」が 継続者（77%）vs 離脱者（53%）で 大きく異なっていた。
->
-> しかし予測モデルでは重要度=0。
->
-> なので、トレーナー利用は継続と相関するが、 有酸素運動量・滞在時間などの 他の変数で説明できてしまう。
->
-> → トレーナー利用は「結果」であり 「原因」ではない可能性がある。
+## ③施策提案
 
-> **ビジネスへの示唆**:
->
-> 継続予測に最も効くのは **「どれだけ運動したか」**であり 「何回来たか」ではない。
->
-> → 来館回数より運動の質・量を 高める施策が効果的！ → 有酸素運動プログラムの充実が 継続率向上につながる可能性がある。
+::: {.callout-tip title="③ 継続率予測モデルの解釈"}
+## 継続率予測モデル
+
+**【モデル性能】**
+
+| 指標     | 値        | 評価             |
+|----------|-----------|------------------|
+| AUC      | 0.968     | ほぼ完璧         |
+| 検証方法 | 5-Fold CV | 汎化性能確認済み |
+
+------------------------------------------------------------------------
+
+**【変数重要度の解釈】**
+
+| 順位 | 変数           | 重要度 |
+|------|----------------|--------|
+| 1位  | 有酸素運動量   | 100    |
+| 2位  | ジム滞在時間   | 60.5   |
+| 3位  | ジム来館回数   | 33.4   |
+| 4位  | 累計購入金額   | 33.2   |
+| 5位  | 年齢           | 6.7    |
+| 6位  | トレーナー利用 | 0      |
+
+継続予測において最も重要な変数は **有酸素運動量（重要度=100）**であり、 次いで**ジム滞在時間（60.5）**、 **ジム来館回数（33.4）**と続く。
+
+これらの結果から、継続するユーザーは 単にジムに来るだけでなく、 **積極的に運動している**ことが示唆される。
+
+**累計購入金額（33.2）**も重要度が高く、 商品を購入したユーザーは ジムへの投資意識が高く継続しやすい 傾向があると解釈できる。
+
+------------------------------------------------------------------------
+
+**【注目点: トレーナー利用（重要度=0）】**
+
+①の分析では「トレーナー利用率」が 継続者（77%）vs 離脱者（53%）で 大きく異なっていた。
+
+しかし予測モデルでは**重要度=0**。
+
+これは「**相関は因果を意味しない**」という 統計学の重要な原則を示している。 トレーナー利用は継続と相関するが、 有酸素運動量・滞在時間などの 他の変数で説明できてしまう。
+
+→ トレーナー利用は継続の「**結果**」であり 「**原因**」ではない可能性がある。
+
+------------------------------------------------------------------------
+
+**【ビジネスへの示唆】**
+
+継続率向上に最も効くのは **「どれだけ運動したか」**であり 「何回来たか」ではない。
+
+→ 来館回数より運動の質・量を高める施策が効果的！
+
+具体的な施策:
+
+-   有酸素運動プログラムの充実
+-   ランニングマシン・バイクの活用促進
+-   入会1週目の有酸素運動体験セッションの実施
+-   運動量の目標設定・達成通知機能の導入
+:::
 
 # ④ 購入金額予測モデル
 
-## データ準備
+### データ準備
 
 ```{r}
+# ══════════════════════════════════════════════════
+# ④ 購入金額予測モデル
+# 目的: 入会から30日以内のデータから
+#       30日間の累計購入金額を予測する
+#       回帰モデルを構築する
+# アルゴリズム: Random Forest（回帰）
+# 評価方法:    5-Fold Cross Validation
+# 評価指標:    RMSE・MAE・R²
+# ══════════════════════════════════════════════════
+
+# ── モデル用データの準備 ──────────────────
 model_purchase <- master %>%
   mutate(
     across(c(aerobic, calorie_ctrl, trainer, gym_visits, gym_hours),
@@ -728,6 +1325,8 @@ model_purchase <- master %>%
     across(c(delta_weight, delta_bodyfat, delta_muscle),
            ~ replace_na(., 0))
   ) %>%
+  
+  # 予測に使う特徴量と目的変数を選択
   select(total_purchase, age, gender, purpose, aerobic, calorie_ctrl,
          trainer, gym_visits, gym_hours, delta_weight, delta_bodyfat,
          delta_muscle, continued, area_id, purchased)
@@ -738,25 +1337,44 @@ cat("購入金額 標準偏差:", comma(round(sd(model_purchase$total_purchase))
 
 ```
 
-## Random Forest 回帰モデル（5-Ford cv)
+> **【データ概要】**
+>
+> | 項目              | 値      |
+> |-------------------|---------|
+> | サンプル数        | 200人   |
+> | 購入金額 平均     | 5,387円 |
+> | 購入金額 標準偏差 | 7,914円 |
+>
+> 標準偏差（7,914円）が平均（5,387円）を 大きく上回っており、 ユーザー間の購入金額に 非常に大きなばらつきがある。 0円の未購入者が多い一方、 一部に高額購入者（40,000円以上）が存在するため。
+
+### Random Forest 回帰モデル（5-Fold CV)
 
 ```{r}
+# ── Random Forest 回帰モデルの構築 ────────
+# 5-Fold Cross Validationで購入金額を予測する
 set.seed(42)
 
+# ── 交差検証の設定 ────────────────────────────────
 ctrl_reg <- trainControl(
-  method          = "cv",
+  method = "cv",
+  # cv = Cross Validation（交差検証）
+  # データを5分割してモデルの汎化性能を測定する
   number          = 5,
   savePredictions = "final"
 )
 
+# ── モデルの学習 ──────────────────────────────────
 rf_purchase <- train(
-  total_purchase ~ .,
+  total_purchase ~ ., # "~"using "." All other columns
   data      = model_purchase,
-  method    = "rf",
+  method    = "rf", # Random Forest
   metric    = "RMSE",
-  trControl = ctrl_reg,
-  ntree     = 300,
+  trControl = ctrl_reg,   # 上で設定した交差検証のルールを適用
+  ntree     = 300, # 作成するRandom Treeの数
   tuneGrid  = data.frame(mtry = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13))
+  # mtry: 各分岐点でランダムに選ぶ特徴量の数
+  # 特徴量数=14 なので1〜13を全て試す
+  # Rが自動的に最良のmtryを選択する
 )
  
 cat("Best mtry:", rf_purchase$bestTune$mtry, "\n")
@@ -765,65 +1383,205 @@ cat("Best mtry:", rf_purchase$bestTune$mtry, "\n")
 ## モデル評価
 
 ```{r}
-preds_reg <- rf_purchase$pred %>% # contains ALL predictions from CV
-  filter(mtry == rf_purchase$bestTune$mtry) #keeps ONLY the best mtry rows
+# ── モデルの評価（実際値 vs 予測値） ─────
+# 5-Fold CVの予測結果を散布図で可視化する
 
-# Scatter plot
-ggplot(preds_reg, aes(x = obs, y = pred)) +
-  geom_point(alpha = 0.3, color = PALETTE[1], size = 1.8) +
-  geom_abline(linetype = "dashed", color = PALETTE[2], linewidth = 1) +
+# ── 最良のmtryの予測結果を取得 ───────────────────
+preds_reg <- rf_purchase$pred %>%
+  filter(mtry == rf_purchase$bestTune$mtry)
+  # → 最良のmtry（=5）の結果のみを抽出する
+  
+  # preds_reg の構造:
+  # obs  = 実際の購入金額（円）
+  # pred = 予測した購入金額（円）
+
+# ── 散布図の作成 ──────────────────────────────────
+ggplot(preds_reg, aes(
+  x = obs,   # x軸: 実際の購入金額
+  y = pred   # y軸: 予測した購入金額
+)) +
+
+  # 各ユーザーを点でプロット
+  geom_point(
+    alpha = 0.3,         
+    color = PALETTE[1], 
+    size  = 1.8
+  ) +
+
+  # 完全予測ライン（破線）を追加
+  geom_abline(
+    linetype  = "dashed",
+    color     = PALETTE[2], 
+    linewidth = 1
+  ) +
+
+  # 軸を3桁区切りで表示（例: 10,000）
   scale_x_continuous(labels = comma) +
   scale_y_continuous(labels = comma) +
-  labs(title = "実際値 vs 予測値（5-Fold CV）",
-       subtitle = "破線: 完全予測ライン",
-       x = "実際の購入金額（円）",
-       y = "予測購入金額（円）")
+
+  labs(
+    title    = "実際値 vs 予測値（5-Fold CV）",
+    subtitle = "破線: 完全予測ライン",
+    x        = "実際の購入金額（円）",
+    y        = "予測購入金額（円）"
+  )
 ```
-
-## 
-
-```{r}
-res <- rf_purchase$results %>%
-  filter(mtry == rf_purchase$bestTune$mtry) %>%
-  mutate(across(c(RMSE, MAE, Rsquared), ~ round(., 3)))
-
-res %>%
-  select(mtry, RMSE, MAE, Rsquared) %>%
-  rename(`R²` = Rsquared) %>%
-  kable(caption = "CV結果（購入金額予測モデル）") %>%
-  kable_styling(bootstrap_options = c("striped","hover"), full_width = FALSE)
-```
-
-> **④ 購入金額予測モデルの解釈**
->
-> **【データ概要】** サンプル数: 200人 購入金額 平均: 5,387円 購入金額 標準偏差: 7,914円
->
-> 標準偏差が平均を大きく上回っており、 ユーザー間の購入金額に 大きなばらつきがあることがわかる。 （購入ゼロ円〜40,000円以上まで分布）
-
-> **【モデル性能】** mtry = 5 RMSE = 3,432円 MAE = 1,411円 R² = 0.885
->
-> R² = 0.885は非常に高い値であり、 モデルは購入金額の変動の88.5%を 正確に説明できている。
->
-> MAE = 1,411円は平均誤差を示しており、 平均購入金額5,387円に対して 約26%の誤差率となる。
 
 > **【実際値 vs 予測値の分析】**
 >
-> 低購入金額帯（¥0〜5,000）: → 点が対角線に密集 ✅ → 高精度で予測できている
+> | 購入金額帯     | 予測精度 | 理由             |
+> |----------------|----------|------------------|
+> | ¥0〜5,000      | 高い     | サンプルが多い   |
+> | ¥5,000〜15,000 | 中程度   | ばらつきあり     |
+> | ¥20,000以上    | 低い     | サンプルが少ない |
 >
-> 高購入金額帯（¥20,000以上）: → 点が対角線から離れる ⚠️ → 予測誤差が大きくなる傾向 → サンプル数が少ないため パターン学習が困難
+> **低購入金額帯（¥0〜5,000）:** 点が破線付近に密集しており、 高い精度で予測できている。 未購入者（0円）と少額購入者の パターンをよく学習できている。
+>
+> **高購入金額帯（¥20,000以上）:** 点が破線から大きく離れており、 予測誤差が大きくなる傾向がある。 高額購入者のサンプルが少ないため パターン学習が困難であることが原因。 これは回帰モデルで一般的に見られる現象である。
+>
+> **全体的な傾向:** 点群は全体的に破線に沿って 右上がりの傾向を示しており、 モデルが購入金額の大まかな 傾向を捉えられていることがわかる。
 
-> **【RMSEとMAEの差について】**
+```{r}
+# ── CV結果の数値確認 ──────────────────────
+# 5-Fold CVの評価指標（RMSE・MAE・R²）を
+# テーブル形式で表示する
+
+# ── 最良のmtryの結果を抽出 ───────────────────────
+res <- rf_purchase$results %>%
+  # → 最良のmtry（=5）の行のみを抽出
+  filter(mtry == rf_purchase$bestTune$mtry) %>%
+
+  # 小数点3桁に丸める（表示用）
+  mutate(across(c(RMSE, MAE, Rsquared), ~ round(., 3)))
+
+# ── 結果をテーブル表示 ────────────────────────────
+res %>%
+  select(mtry, RMSE, MAE, Rsquared) %>%
+  rename(`R²` = Rsquared) %>%
+　kable(caption = "CV結果（購入金額予測モデル）") %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover"),
+    full_width = FALSE
+  )
+```
+
+> **【CV結果（購入金額予測モデル）の解釈】**
 >
-> RMSE = 3,432円 MAE = 1,411円 差 = 2,021円
+> | 指標 | 値      | 意味               |
+> |------|---------|--------------------|
+> | mtry | 5       | 最良の特徴量選択数 |
+> | RMSE | 3,431円 | 平均予測誤差       |
+> | MAE  | 1,349円 | 中央値的な予測誤差 |
+> | R²   | 0.889   | 変動の説明率       |
 >
-> RMSEはMAEの約2.4倍と大きな差がある。 これはRMSEが大きな誤差を より強く罰するためであり、 高額購入者の予測が外れた際に RMSEが大きく跳ね上がることを示す。 実態に近い平均誤差はMAEの 1,411円と解釈するのが適切である。
+> **R² = 0.889（非常に良い）:** モデルは購入金額の変動の**88.9%**を 正確に説明できており、 非常に高い予測性能を示している。
 >
-> **【ビジネスへの示唆】**
+> **RMSE = 3,431円 vs MAE = 1,349円:** RMSEとMAEの差が大きい（約2,082円）。 これはRMSEが大きな誤差を より強く罰するためであり、 高額購入者の予測が外れた際に RMSEが大きく跳ね上がることを示す。 実態に近い平均誤差は MAEの**1,349円**と解釈するのが適切である。
 >
-> このモデルを活用することで: 入会直後のデータから 30日以内の購入金額を予測し、
+> **汎化性能について:** 5-Fold CVにより、モデルは 学習に使用していない未知データに対しても 高い予測性能を維持することが確認された。 過学習のリスクは低く、 実際の新規入会者への適用が期待できる。
 >
-> 高購入見込みユーザー（予測値¥10,000以上） → プロテイン3kg・コンディションガンなど 高額商品のターゲット広告を配信
->
-> 低購入見込みユーザー（予測値¥0〜3,000） → 500円クーポン配布で 初回購買のハードルを下げる
->
-> → 商品販売ROIの最大化が期待できる！💰
+> **ビジネスへの活用:** 入会直後のデータからこのモデルを適用し、 高購入見込みユーザー（予測値¥10,000以上）へ プロテイン3kg・コンディションガンなどの 高額商品のターゲット広告を配信することで 商品販売ROIの最大化が期待できる。
+
+## ④施策提案
+
+::: {.callout-tip title="④ 購入金額予測モデルの解釈"}
+**【データ概要】**
+
+| 項目              | 値      |
+|-------------------|---------|
+| サンプル数        | 200人   |
+| 購入金額 平均     | 5,387円 |
+| 購入金額 標準偏差 | 7,914円 |
+
+標準偏差が平均を大きく上回っており、 ユーザー間の購入金額に 大きなばらつきがあることがわかる。 （購入ゼロ円〜40,000円以上まで分布）
+
+------------------------------------------------------------------------
+
+**【モデル性能】**
+
+| 指標 | 値      | 評価               |
+|------|---------|--------------------|
+| mtry | 5       | 最良の特徴量選択数 |
+| RMSE | 3,432円 | 平均予測誤差       |
+| MAE  | 1,411円 | 中央値的な予測誤差 |
+| R²   | 0.885   |  非常に良い        |
+
+R² = 0.885は非常に高い値であり、 モデルは購入金額の変動の**88.5%**を 正確に説明できている。
+
+MAE = 1,411円は平均誤差を示しており、 平均購入金額5,387円に対して 約**26%の誤差率**となる。
+
+------------------------------------------------------------------------
+
+**【実際値 vs 予測値の分析】**
+
+| 購入金額帯     | 予測精度 | 理由             |
+|----------------|----------|------------------|
+| ¥0〜5,000      | 高い     | サンプルが多い   |
+| ¥5,000〜15,000 | 中程度   | ばらつきあり     |
+| ¥20,000以上    | 低い     | サンプルが少ない |
+
+**低購入金額帯（¥0〜5,000）:** → 点が対角線に密集 → 高精度で予測できている
+
+**高購入金額帯（¥20,000以上）:** → 点が対角線から離れる → 予測誤差が大きくなる傾向 → サンプル数が少ないため パターン学習が困難
+
+------------------------------------------------------------------------
+
+**【RMSEとMAEの差について】**
+
+| 指標 | 値                            |
+|------|-------------------------------|
+| RMSE | 3,432円                       |
+| MAE  | 1,411円                       |
+| 差   | 2,021円（RMSEはMAEの約2.4倍） |
+
+RMSEはMAEの約**2.4倍**と大きな差がある。 これはRMSEが大きな誤差を より強く罰するためであり、 高額購入者の予測が外れた際に RMSEが大きく跳ね上がることを示す。 実態に近い平均誤差はMAEの **1,411円**と解釈するのが適切である。
+
+------------------------------------------------------------------------
+
+**【ビジネスへの示唆】**
+
+このモデルを活用することで: 入会直後のデータから 30日以内の購入金額を予測し、
+
+**高購入見込みユーザー（予測値¥10,000以上）** → プロテイン3kg・コンディションガンなど 高額商品のターゲット広告を配信
+
+**低購入見込みユーザー（予測値¥0〜3,000）** → 500円クーポン配布で 初回購買のハードルを下げる
+:::
+
+# まとめ・総合施策提案
+
+## 分析結果サマリー
+
+| 課題       | 主な発見                       | 予測精度     |
+|------------|--------------------------------|--------------|
+| ① 継続分析 | 有酸素運動量・滞在時間が最重要 | —            |
+| ② 購入分析 | サプリ71%・北海道が突出        | —            |
+| ③ 継続予測 | Random Forest                  | AUC = 0.968  |
+| ④ 購入予測 | Random Forest                  | R² = 0.885   |
+
+------------------------------------------------------------------------
+
+## 優先施策ロードマップ
+
+::: {.callout-caution title="今すぐ実施すべき施策(例）"}
+**継続率向上:**
+
+-   有酸素運動プログラムの充実
+-   週3回以上来館者へのポイント還元制度
+-   入会1週目の有酸素運動体験セッション
+
+**売上向上:**
+
+-   プロテイン購入者へのEAA・3kgアップセル
+-   入会時スターターセット割引バンドル導入
+-   購入ゼロユーザーへの500円クーポン配布
+:::
+
+::: {.callout-note title="モデルの実践的活用方法"}
+**継続予測モデル（AUC = 0.968）の活用:**
+
+→ 入会2週間時点で離脱リスクスコアを算出 → リスクの高いユーザーへ優先的に トレーナー介入・特別プログラムを提供
+
+**購入金額予測モデル（R² = 0.885）の活用:**
+
+→ 入会直後のデータから購入金額を予測 → 高購入見込みユーザーへ 高額商品のターゲット広告を配信 → 低購入見込みユーザーへ クーポンで初回購買を促進
+:::
